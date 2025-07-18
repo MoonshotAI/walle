@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.23-alpine
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up environment
+      run: |
+        export GOPROXY=https://goproxy.cn,direct
+
+    - name: Install dependencies
+      run: |
+        go install github.com/boumenot/gocover-cobertura@latest
+        go install gotest.tools/gotestsum@latest
+
+    - name: Run tests
+      run: |
+        gotestsum --junitfile report.xml --format testname -- -coverprofile=cover.txt -covermode=atomic -coverpkg=./... ./...
+        gocover-cobertura < cover.txt > cover.xml
+        go tool cover -func=cover.txt
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: |
+          report.xml
+          cover.xml
+
+  lint:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.23-alpine
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up environment
+      run: |
+        export GOPROXY=https://goproxy.cn,direct
+
+    - name: Install golangci-lint
+      run: |
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+        export PATH=$PATH:$(go env GOPATH)/bin
+
+    - name: Run lint
+      run: |
+        golangci-lint run -v

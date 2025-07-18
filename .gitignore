@@ -1,0 +1,5 @@
+*.so
+*.h
+*.log
+bin
+vendor
