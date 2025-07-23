@@ -14,10 +14,11 @@ The main entry point is `walle.go`, which provides two core APIs:
 
 ## cli
 ```
-cd walle
-make build
-./bin/walle -schema '{"type": "object"}' -level strict
-./bin/walle -schema-file your_schema.json
+go install github.com/moonshotai/walle/cmd/walle@latest
+```
+```
+walle -schema '{"type": "object"}' -level strict
+walle -schema-file your_schema.json
 ```
 
 ### go package
