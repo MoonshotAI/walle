@@ -128,17 +128,17 @@ var (
 		"title":                true,
 		"$id":                  true,
 		"default":              true,
+		"maxLength":            true,
+		"minLength":            true,
+		"maximum":              true,
+		"minimum":              true,
+		"maxItems":             true,
+		"minItems":             true,
 	}
 
 	// will be supported in the future
 	FutureKeywords = map[string]bool{
-		"maxLength": true,
-		"minLength": true,
-		"maximum":   true,
-		"minimum":   true,
-		"maxItems":  true,
-		"minItems":  true,
-		"pattern":   true,
+		"pattern": true,
 	}
 
 	InvalidPropertyNames = map[string]bool{
