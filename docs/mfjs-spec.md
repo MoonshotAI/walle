@@ -8,11 +8,11 @@ It is primarily designed for defining **Tool Calling** `parameters` fields and *
 
 While MFJS supports basic JSON Schema structure and type system, the following features have been streamlined or restricted to ensure large models can accurately understand and generate content:
 
-* **`$defs`, `$ref`, `$id` are supported with limitations:** `$defs` must be defined at the schema root level; `$ref` only supports referencing **internal** subschemas within this document (indexed through `$defs`, or using `"$ref": "#"` for self-reference)
+* **`$defs`, `$ref` are supported with limitations:** `$defs` must be defined at the schema root level; `$ref` only supports referencing **internal** subschemas within this document (indexed through `$defs`, or using `"$ref": "#"` for self-reference)
 * **No external resources:** Meta-Schemas and any HTTP-based external network resource references are not supported
 * **No metadata and annotations:** Descriptive metadata like `title`, `$comment`, and `format` annotation fields are not supported
 * **No advanced array definitions:** Tuple simulation using `prefixItems` or `unevaluatedItems` is not supported
-* **No complex validation:** Complex validation keywords such as `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems` are not supported
+* **No complex validation:** Complex validation keywords such as `exclusiveMinimum`, `exclusiveMaximum`, `minContains`, `maxContains` are not supported
 
 MFJS operates as a curated JSON Schema subset within model interactions, maintaining recognition of this format while striving to produce outputs that conform to the specified schema definitions. This document provides a comprehensive specification of MFJS, including detailed definitions, field specifications, and practical examples for both Tool Calling and Response Format use cases.
 
@@ -344,4 +344,4 @@ The definitions and design of this document reference the following JSON Schema 
 ### Informational References
 
 - [JSON Schema Reference](https://json-schema.org/understanding-json-schema/reference#json-schema-reference) - Official JSON Schema reference manual
-- [JSON Schema 2019-09](https://www.learnjsonschema.com/2019-09/) - Includes detailed information about each keyword, plus many examples
+- [JSON Schema 2020-12](https://www.learnjsonschema.com/2020-12/) - Includes detailed information about each keyword, plus many examples

@@ -8,11 +8,11 @@ Moonshot Flavored JSON Schema (MFJS) 是 Moonshot AI 为解决大语言模型（
 
 虽然 MFJS 支持基本的 JSON Schema 结构和类型系统，但为确保大模型能准确理解和生成，对以下功能进行了精简或限制：
 
-* **`$defs`, `$ref`, `$id` 受限支持：** `$defs` 必须定义在 schema 的根级别 (root level)；`$ref` 仅支持引用**本文档内部**的 subschema（通过 `$defs` 索引，或使用 `"$ref": "#"` 自我引用）。
+* **`$defs`, `$ref` 受限支持：** `$defs` 必须定义在 schema 的根级别 (root level)；`$ref` 仅支持引用**本文档内部**的 subschema（通过 `$defs` 索引，或使用 `"$ref": "#"` 自我引用）。
 * **不支持外部资源：** 暂不支持 Meta-Schemas，也不支持任何基于 HTTP 的外部网络资源引用。
 * **不支持元数据与注解：** 暂不支持 `title`、`$comment` 等描述性元数据，也不支持 `format` 格式注解字段。
 * **不支持高级数组定义：** 暂不支持使用 `prefixItems` 或 `unevaluatedItems` 等方式模拟实现元组（Tuple）。
-* **不支持复杂校验：** 暂不支持如 `minimum`、`exclusiveMinimum`、`maximum`、`exclusiveMaximum`、`minItems`、`maxItems` 等复杂校验定义。
+* **不支持复杂校验：** 暂不支持如 `exclusiveMinimum`，`exclusiveMaximum`，`minContains`, `maxContains` 等复杂校验定义。
 
 在模型和接口的交互中，我们实现了一个基于 JSON Schema 的子集，我们会识别这个格式，并且努力给出符合规范的输出。
 
@@ -294,7 +294,7 @@ additionalProperties 默认值为 `{}`，也就是说如果不设置它，那么
 #### items
 **类型**: Schema
 
-当 `type` 为 `array` 的时候，它定义了每个 array 每个元素的子 schema。
+当 `type` 为 `array` 的时候，它定义了每个 array 元素的子 schema。
 
 ### Validation 字段
 
@@ -345,4 +345,4 @@ Validation 字段用于定义目标实例的内容格式，它主要应用于叶
 ### 信息性参考文献
 
 - [JSON Schema Reference](https://json-schema.org/understanding-json-schema/reference#json-schema-reference) - JSON Schema 的官方参考手册
-- [JSON Schema 2019-09](https://www.learnjsonschema.com/2019-09/) - 包含各个关键字的详细信息及丰富的应用示例
+- [JSON Schema 2020-12](https://www.learnjsonschema.com/2020-12/) - 包含各个关键字的详细信息及丰富的应用示例
