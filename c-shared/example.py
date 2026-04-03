@@ -41,7 +41,7 @@ def use_custom_config():
         }
         """
         custom_config = {
-            "validateLevel": "lite",
+            "validateLevel": "strict",
         }
         print("\nuse custom config")
         validator.validate_schema(schema, custom_config)

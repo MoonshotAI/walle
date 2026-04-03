@@ -5,10 +5,11 @@ A Moonshot AI flavored Json schema validator.
 The main entry point is `walle.go`, which provides two core APIs:
 - `ParseSchema`: Parses input JSON schema string and creates a walle schema instance
 - `Schema.Validate`: Validates the schema with optional configurations
-  - Three validation levels:
-    - **strict**: Most comprehensive validation including potentially "harmless" checks (e.g., no duplicate items). Aligns with model training behavior.
-    - **lite**: Semantic correctness validation. The most permissive level required by Moonshot AI server for efficient structured generation.
-    - **loose**: Minimal validation that relies more on model capabilities. (Not recommended for production use)
+  - Validation levels:
+    - **ultra** / **default**: Most comprehensive validation including potentially "harmless" checks (e.g., no duplicate items).
+    - **strict**: The most permissive level required by Moonshot AI server for efficient structured generation.
+    - **lite**: Skips a subset of rules that **strict** enforces.
+    - **loose**: Skips schema validation in `Schema.Validate` and relies more on model capabilities.
 
 ## Usage
 

@@ -11,6 +11,8 @@ func TestValidatorConfigOptions(t *testing.T) {
 		// Verify default values
 		defaultConfig := DefaultValidatorConfig()
 		assert.Equal(t, ValidateLevelDefault, defaultConfig.ValidateLevel)
+		assert.True(t, defaultConfig.IsUltra())
+		assert.False(t, defaultConfig.IsStrict())
 		assert.Equal(t, 500, defaultConfig.MaxEnumItems)
 		assert.Equal(t, 7500, defaultConfig.MaxEnumStringLength)
 		assert.Equal(t, 250, defaultConfig.MaxEnumStringCheckThreshold)
@@ -152,12 +154,18 @@ func TestValidatorConfigOptions(t *testing.T) {
 		assert.Equal(t, 1000, config.MaxTotalPropertiesKeysNum)
 	})
 
+	t.Run("WithValidateLevel lite", func(t *testing.T) {
+		config := DefaultValidatorConfig()
+		WithValidateLevel(ValidateLevelLite)(&config)
+		assert.Equal(t, ValidateLevelLite, config.ValidateLevel)
+	})
+
 	t.Run("Multiple options with ValidateLevel", func(t *testing.T) {
 		config := DefaultValidatorConfig()
 
 		// Apply multiple options including ValidateLevel
 		options := []SchemaValidatorOption{
-			WithValidateLevel(ValidateLevelStrict),
+			WithValidateLevel(ValidateLevelUltra),
 			WithMaxEnumItems(200),
 			WithMaxSchemaDepth(7),
 		}
@@ -167,7 +175,7 @@ func TestValidatorConfigOptions(t *testing.T) {
 		}
 
 		// Verify all changes were applied correctly
-		assert.Equal(t, ValidateLevelStrict, config.ValidateLevel)
+		assert.Equal(t, ValidateLevelUltra, config.ValidateLevel)
 		assert.Equal(t, 200, config.MaxEnumItems)
 		assert.Equal(t, 7500, config.MaxEnumStringLength)
 		assert.Equal(t, 250, config.MaxEnumStringCheckThreshold)

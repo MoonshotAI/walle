@@ -147,7 +147,7 @@ func (v *schemaValidator) TraverseSchema(schema SchemaDict, path schemaPath, cur
 		}
 	}
 
-	if len(unsupported) > 0 && (v.config.IsStrict() || v.config.IsTest()) {
+	if len(unsupported) > 0 && (v.config.IsUltra() || v.config.IsTest()) {
 		return currentDepth, v.context.RaiseErrorWithSimplify(fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")), path, SimplifyDefault)
 	}
 
@@ -377,20 +377,22 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 				allowedEnum = true
 			}
 
-			for k := range schema {
-				if path.IsRoot() {
-					if !TopLevelOnlyKeywords[k] && !CommonKeywords[k] && k != Type && !allowedEnum {
-						return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s is not allowed in combination with multiple types", k), path, SimplifyRemoveParentSchema)
-					}
-				} else {
-					if !CommonKeywords[k] && k != Type && !allowedEnum {
-						return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s is not allowed in combination with multiple types", k), path, SimplifyRemoveParentSchema)
+			if v.config.IsStrict() || v.config.IsUltra() || v.config.IsTest() {
+				for k := range schema {
+					if path.IsRoot() {
+						if !TopLevelOnlyKeywords[k] && !CommonKeywords[k] && k != Type && !allowedEnum {
+							return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s is not allowed in combination with multiple types", k), path, SimplifyRemoveParentSchema)
+						}
+					} else {
+						if !CommonKeywords[k] && k != Type && !allowedEnum {
+							return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s is not allowed in combination with multiple types", k), path, SimplifyRemoveParentSchema)
+						}
 					}
 				}
 			}
 		}
 
-		if len(types) >= 1 && (v.config.IsStrict() || v.config.IsTest()) {
+		if len(types) >= 1 && (v.config.IsUltra() || v.config.IsTest()) {
 			// FIXME: Check every type later.
 			chooseType = types[0]
 			// Check $defs and $id are only at top level

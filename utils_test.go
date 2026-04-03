@@ -397,7 +397,7 @@ func TestTraverseAndCheckRefs(t *testing.T) {
 		must.Error(err)
 		must.Contains(strings.ToLower(err.Error()), "detected infinite recursion")
 
-		if validator.config.IsStrict() || validator.config.IsTest() {
+		if validator.config.IsUltra() || validator.config.IsTest() {
 			// Test reference with conflicting keywords
 			schema = SchemaDict{
 				"$ref": "#/$defs/simpleType",
@@ -472,7 +472,7 @@ func TestExpandRef(t *testing.T) {
 		must.NoError(err)
 		must.Equal("string", expanded["type"])
 
-		if validator.config.IsStrict() || validator.config.IsTest() {
+		if validator.config.IsUltra() || validator.config.IsTest() {
 			// Test expansion of nested reference
 			schema = SchemaDict{
 				"$ref": "#/$defs/nestedRef",
@@ -535,7 +535,7 @@ func TestCheckRefContext(t *testing.T) {
 		err = validator.CheckRefContext(parent, refSchema, newSchemaPath(""))
 		must.NoError(err)
 
-		if validator.config.IsStrict() || validator.config.IsTest() {
+		if validator.config.IsUltra() || validator.config.IsTest() {
 			// Test with direct keyword conflict
 			parent = SchemaDict{
 				"$ref": "#/$defs/type",

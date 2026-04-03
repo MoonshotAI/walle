@@ -9,6 +9,7 @@ class ValidateLevel(str, Enum):
     LOOSE = "loose"
     LITE = "lite"
     STRICT = "strict"
+    ULTRA = "ultra"
 
 
 class WalleValidator:
@@ -41,8 +42,8 @@ class WalleValidator:
             schema: Json schema string
             config: Optional configuration parameters, supporting the following fields:
                 {
-                    "validateLevel": str,  # Validation level: "loose"/"lite"/"strict"
-                                           # Default: "strict", "strict" performs more rigorous validation
+                    "validateLevel": str,  # Validation level: "loose"/"lite"/"strict"/"ultra"
+                                           # Default: "strict"
                     "maxEnumItems": int,  # Maximum number of enum items
                                           # Default: 500
                     "maxEnumStringLength": int,  # Maximum length of enum strings

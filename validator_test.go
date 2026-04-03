@@ -4913,9 +4913,9 @@ func runTestCases(t *testing.T, validCases []string, invalidCases []struct {
 	}
 }
 
-func TestStrictValidate(t *testing.T) {
+func TestUltraValidate(t *testing.T) {
 	must := require.New(t)
-	validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
 
 	invalidCases := []struct {
 		schema         string
@@ -4962,5 +4962,20 @@ func TestStrictValidate(t *testing.T) {
 			must.Contains(errLower, expectedLower,
 				"Expected error containing '%s', got '%s', %v", tc.expectedErr, err.Error(), tc.schema)
 		}
+	}
+}
+
+func TestLiteAllowsMultipleTypesWithItems(t *testing.T) {
+	must := require.New(t)
+	schema := `{"additionalProperties": false, "properties": {"files": {"description": "List of files to read; request related files together when allowed", "items": {"additionalProperties": false, "properties": {"line_ranges": {"description": "Optional line ranges to read. Each range is a [start, end] tuple with 1-based inclusive line numbers. Use multiple ranges for non-contiguous sections.", "items": {"items": {"type": "integer"}, "maxItems": 2, "minItems": 2, "type": "array"}, "type": ["array", "null"]}, "path": {"description": "Path to the file to read, relative to the workspace", "type": "string"}}, "required": ["path", "line_ranges"], "type": "object"}, "minItems": 1, "type": "array"}}, "required": ["files"], "type": "object"}`
+
+	lite := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+	must.NoError(lite.Validate(schema), "lite should accept type[] + items")
+
+	for _, level := range []ValidateLevel{ValidateLevelStrict, ValidateLevelUltra, ValidateLevelDefault} {
+		v := newSchemaValidator(WithValidateLevel(level))
+		err := v.Validate(schema)
+		must.Error(err, "level %s should reject", level)
+		must.Contains(strings.ToLower(err.Error()), "multiple types")
 	}
 }

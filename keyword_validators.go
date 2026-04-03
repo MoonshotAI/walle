@@ -25,7 +25,7 @@ func (v *keywordValidators) ValidateType(value any, context *validationContext, 
 	case string:
 		return nil
 	case SchemaList:
-		if v.config.IsStrict() || v.config.IsTest() {
+		if v.config.IsUltra() || v.config.IsTest() {
 			// Check for duplicates
 			seen := make(map[string]struct{})
 			for _, t := range val {
@@ -48,7 +48,7 @@ func (v *keywordValidators) ValidateProperties(value any, context *validationCon
 	}
 
 	for propName, propSchema := range props {
-		if v.config.IsStrict() || v.config.IsTest() {
+		if v.config.IsUltra() || v.config.IsTest() {
 			if propName == "" {
 				return context.RaiseErrorWithSimplify("property name cannot be empty", path, SimplifyDefault)
 			}
@@ -84,7 +84,7 @@ func (v *keywordValidators) ValidateRequired(value any, context *validationConte
 			return context.RaiseErrorWithSimplify("items in required array must be strings", path, SimplifyRemoveRequired)
 		}
 
-		if v.config.IsStrict() || v.config.IsTest() {
+		if v.config.IsUltra() || v.config.IsTest() {
 			if propStr == "" {
 				return context.RaiseErrorWithSimplify("property names in required array cannot be empty", path, SimplifyRemoveRequired)
 			}
@@ -92,7 +92,7 @@ func (v *keywordValidators) ValidateRequired(value any, context *validationConte
 	}
 
 	// Check for duplicates
-	if v.config.IsStrict() || v.config.IsTest() {
+	if v.config.IsUltra() || v.config.IsTest() {
 		seen := make(map[string]struct{})
 		for _, prop := range required {
 			propStr := prop.(string)
@@ -118,7 +118,7 @@ func (v *keywordValidators) ValidateRequired(value any, context *validationConte
 	}
 
 	props, hasProps := current[Properties].(SchemaDict)
-	if v.config.IsStrict() || v.config.IsTest() {
+	if v.config.IsUltra() || v.config.IsTest() {
 		// Check if current schema is object type
 		schemaType, hasType := current[Type]
 		if !hasType {
@@ -358,7 +358,7 @@ func (v *keywordValidators) ValidateRef(value any, context *validationContext, p
 			continue
 		}
 
-		if v.config.IsStrict() || v.config.IsTest() {
+		if v.config.IsUltra() || v.config.IsTest() {
 			if !CommonKeywords[key] {
 				return context.RaiseErrorWithSimplify(
 					fmt.Sprintf("keyword '%s' is not allowed at the same level as $ref", key),
@@ -426,7 +426,7 @@ func (v *keywordValidators) ValidateAnyOf(value any, context *validationContext,
 			continue
 		}
 
-		if v.config.IsStrict() || v.config.IsTest() {
+		if v.config.IsUltra() || v.config.IsTest() {
 			if !CommonKeywords[key] {
 				return context.RaiseErrorWithSimplify(
 					fmt.Sprintf("keyword '%s' is not allowed at the same level as anyOf", key),

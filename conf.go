@@ -3,10 +3,11 @@ package walle
 type ValidateLevel string
 
 const (
-	ValidateLevelDefault ValidateLevel = "default" // default == strict
+	ValidateLevelDefault ValidateLevel = "default" // default == ultra
 	ValidateLevelLoose   ValidateLevel = "loose"
 	ValidateLevelLite    ValidateLevel = "lite"
 	ValidateLevelStrict  ValidateLevel = "strict"
+	ValidateLevelUltra   ValidateLevel = "ultra"
 	ValidateLevelTest    ValidateLevel = "test" // Do not use in production!
 )
 
@@ -38,7 +39,7 @@ type SchemaValidatorOption func(*SchemaValidatorConfig)
 
 func WithValidateLevel(level ValidateLevel) SchemaValidatorOption {
 	return func(c *SchemaValidatorConfig) {
-		if level == ValidateLevelDefault || level == ValidateLevelLoose || level == ValidateLevelLite || level == ValidateLevelStrict || level == ValidateLevelTest {
+		if level == ValidateLevelDefault || level == ValidateLevelLoose || level == ValidateLevelLite || level == ValidateLevelStrict || level == ValidateLevelUltra || level == ValidateLevelTest {
 			c.ValidateLevel = level
 		}
 	}
@@ -107,8 +108,12 @@ func WithMaxTotalPropertiesKeysNum(max int) SchemaValidatorOption {
 	}
 }
 
+func (c *SchemaValidatorConfig) IsUltra() bool {
+	return c.ValidateLevel == ValidateLevelUltra || c.ValidateLevel == ValidateLevelDefault
+}
+
 func (c *SchemaValidatorConfig) IsStrict() bool {
-	return c.ValidateLevel == ValidateLevelStrict || c.ValidateLevel == ValidateLevelDefault
+	return c.ValidateLevel == ValidateLevelStrict
 }
 
 func (c *SchemaValidatorConfig) IsLite() bool {

@@ -14,7 +14,7 @@ import (
 var (
 	schema     = flag.String("schema", "", "JSON Schema string")
 	schemaFile = flag.String("schema-file", "", "JSON Schema file path")
-	level      = flag.String("level", "strict", "Validation level (loose, lite, strict)")
+	level      = flag.String("level", "strict", "Validation level (loose, lite, strict, ultra, default)")
 	h          = flag.Bool("h", false, "Show help information")
 	v          = flag.Bool("v", false, "Show version information")
 )
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	if !isValidLevel(*level) {
-		fmt.Fprintf(os.Stderr, "Error: invalid validation level '%s'. Valid values: loose, lite, strict\n", *level)
+		fmt.Fprintf(os.Stderr, "Error: invalid validation level '%s'. Valid values: loose, lite, strict, ultra, default\n", *level)
 		os.Exit(1)
 	}
 
@@ -112,7 +112,7 @@ func printUsage() {
 	fmt.Println("Parameters:")
 	fmt.Println("  -schema        JSON Schema string")
 	fmt.Println("  -schema-file   JSON Schema file path")
-	fmt.Println("  -level         Validation level (loose, lite, strict), default is strict")
+	fmt.Println("  -level         Validation level (loose, lite, strict, ultra, default), default is strict")
 	fmt.Println("  -h             Show this help information")
 	fmt.Println("  -v             Show version information")
 	fmt.Println()
@@ -122,7 +122,7 @@ func printUsage() {
 	fmt.Println("  walle -schema '{\"type\": \"object\"}' -level strict")
 	fmt.Println("  walle -schema-file schema.json")
 	fmt.Println("  walle < schema.json")
-	fmt.Println("  cat schema.json | walle -level strict")
+	fmt.Println("  cat schema.json | walle -level lite")
 	fmt.Println("  echo '{\"type\": \"string\"}' | walle")
 	fmt.Println("  walle -v")
 }
@@ -157,7 +157,7 @@ func printVersion() {
 }
 
 func isValidLevel(level string) bool {
-	validLevels := []string{"loose", "lite", "strict"}
+	validLevels := []string{"loose", "lite", "strict", "ultra", "default"}
 	for _, valid := range validLevels {
 		if level == valid {
 			return true

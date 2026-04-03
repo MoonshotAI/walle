@@ -8,7 +8,6 @@ func ParseSchema(jsonStr string) (Schema, error) {
 
 func (s Schema) Validate(options ...SchemaValidatorOption) error {
 	validator := newSchemaValidator(options...)
-	// FIXME: redefine loose logic
 	if validator.config.IsLoose() {
 		return nil
 	}
@@ -16,9 +15,9 @@ func (s Schema) Validate(options ...SchemaValidatorOption) error {
 }
 
 // Canonical returns a schema representation that conforms to Moonshot AI server requirements.
-// It uses `lite` validation level, which is the most permissive level supported by the server.
+// It uses `strict` validation level, which is the most permissive level supported by the enforcer-server.
 // If the original schema has issues, it returns a simplified schema.
 func (s Schema) Canonical() (string, error) {
-	validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
 	return validator.CanonicalWithMaxAttempts(s, 20)
 }

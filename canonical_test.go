@@ -218,7 +218,7 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 				}
 			}`,
 		},
-		// only work in strict mode
+		// only work in ultra mode
 		// {
 		// 	name: "duplicate_type",
 		// 	invalidSchema: `{
@@ -873,7 +873,7 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 			}`,
 			simplifiedSchema: `{"type": "object"}`,
 		},
-		// only work in strict mode
+		// only work in ultra mode
 		// {
 		// 	name: "negative_items_val_0",
 		// 	invalidSchema: `{
@@ -1087,7 +1087,7 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 				t.Errorf("Expected simplified schema: %s, but got: %s", expectedSchema, fixedSchema)
 			}
 
-			validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+			validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
 			if err := validator.Validate(fixedSchema); err != nil {
 				t.Errorf("Fixed schema should pass validation but failed: %v", err)
 			}
