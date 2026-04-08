@@ -1,0 +1,32 @@
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": 10,\n\t\t\t\t\"maxLength\": 5\n\t\t\t}","expect":"cannot be greater than maxLength","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": -1,\n\t\t\t\t\"maxLength\": 5\n\t\t\t}","expect":"non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": 0,\n\t\t\t\t\"maxLength\": -5\n\t\t\t}","expect":"non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": \"5\",\n\t\t\t\t\"maxLength\": 10\n\t\t\t}","expect":"must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": 5,\n\t\t\t\t\"maxLength\": \"10\"\n\t\t\t}","expect":"must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"minimum\": 10,\n\t\t\t\t\"maximum\": 5\n\t\t\t}","expect":"cannot be greater than","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"minimum\": \"0\",\n\t\t\t\t\"maximum\": 10\n\t\t\t}","expect":"must be a number","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"minimum\": 0,\n\t\t\t\t\"maximum\": \"10\"\n\t\t\t}","expect":"must be a number","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"minimum\": 1.5,\n\t\t\t\t\"maximum\": 10\n\t\t\t}","expect":"not a valid integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"minimum\": 1,\n\t\t\t\t\"maximum\": 10.5\n\t\t\t}","expect":"not a valid integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": 10,\n\t\t\t\t\"maxItems\": 5\n\t\t\t}","expect":"greater than","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": -1,\n\t\t\t\t\"maxItems\": 5\n\t\t\t}","expect":"must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": 0,\n\t\t\t\t\"maxItems\": -5\n\t\t\t}","expect":"must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": \"5\",\n\t\t\t\t\"maxItems\": 10\n\t\t\t}","expect":"must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": 5,\n\t\t\t\t\"maxItems\": \"10\"\n\t\t\t}","expect":"must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": -1\n\t\t\t}","expect":"minLength must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"maxLength\": -5\n\t\t\t}","expect":"maxLength must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": \"5\"\n\t\t\t}","expect":"minLength must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"maxLength\": \"10\"\n\t\t\t}","expect":"maxLength must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"minimum\": 1.5\n\t\t\t}","expect":"not a valid integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"maximum\": 10.5\n\t\t\t}","expect":"not a valid integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"minimum\": \"0\"\n\t\t\t}","expect":"minimum must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"minimum\": \"0\"\n\t\t\t}","expect":"minimum must be a number","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"maximum\": \"10\"\n\t\t\t}","expect":"maximum must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"maximum\": \"10\"\n\t\t\t}","expect":"maximum must be a number","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": -1\n\t\t\t}","expect":"minItems must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"maxItems\": -5\n\t\t\t}","expect":"maxItems must be non-negative","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": \"5\"\n\t\t\t}","expect":"minItems must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"maxItems\": \"10\"\n\t\t\t}","expect":"maxItems must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": 123,\n\t\t\t\t\"minLength\": 1,\n\t\t\t\t\"maxLength\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": 123,\n\t\t\t\t\"minimum\": 1,\n\t\t\t\t\"maximum\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minItems\": 1,\n\t\t\t\t\"maxItems\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}

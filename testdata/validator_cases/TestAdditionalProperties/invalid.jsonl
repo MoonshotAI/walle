@@ -1,0 +1,4 @@
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"additionalProperties\": 123\n\t\t\t}","expect":"additionalProperties must be a boolean or an object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"additionalProperties\": \"invalid\"\n\t\t\t}","expect":"additionalProperties must be a boolean or an object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"additionalProperties\": [\"invalid\"]\n\t\t\t}","expect":"additionalProperties must be a boolean or an object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"additionalProperties\": null\n\t\t\t}","expect":"additionalProperties must be a boolean or an object","unmarshal":false}

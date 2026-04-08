@@ -1,0 +1,11 @@
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"User\": []\n\t\t\t\t}\n\t\t\t}","expect":"$defs schema must be object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"user\": {\"$ref\": \"#/$defs/User\"}\n\t\t\t\t}\n\t\t\t}","expect":"$defs not found for reference","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"\": {\"type\": \"string\"}\n\t\t\t\t}\n\t\t\t}","expect":"$defs property name cannot be empty","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t123: {\"type\": \"string\"}\n\t\t\t\t}\n\t\t\t}","expect":"JSON schema parsing error","unmarshal":true}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"user\": {\"$ref\": \"invalid_ref\"}\n\t\t\t\t}\n\t\t\t}","expect":"references must start with #/$defs/","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"$defs\": \"not an object\"\n\t\t\t}","expect":"$defs must be an object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"User\": \"not an object\"\n\t\t\t\t}\n\t\t\t}","expect":"$defs schema must be object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"nullDef\": null\n\t\t\t\t},\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"$defs schema must be object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"nullDef\": []\n\t\t\t\t},\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"$defs schema must be object","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"positive/integer\": {\n\t\t\t\t\t\t\"type\": \"integer\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"cannot contain '/' character","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"test\": {\n\t\t\t\t\t\t\"type\": \"object\",\n\t\t\t\t\t\t\"properties\": {\n\t\t\t\t\t\t\t\"a/b\": {\"type\": \"string\"}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"cannot contain '/' character","unmarshal":false}

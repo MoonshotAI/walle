@@ -1,0 +1,2 @@
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"anyOf\": [\n\t\t\t\t\t{\"type\": \"string\"},\n\t\t\t\t\t{\"type\": \"number\"}\n\t\t\t\t]\n\t\t\t}","expect":"type should be defined in anyOf","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"required\": [\"name\"]\n\t\t\t}","expect":"invalid keywords","unmarshal":false}

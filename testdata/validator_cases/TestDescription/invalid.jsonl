@@ -1,0 +1,3 @@
+{"schema":"{\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": 123\n\t\t\t\t}","expect":"description must be a string","unmarshal":false}
+{"schema":"{\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": {\"text\": \"Invalid description\"}\n\t\t\t\t}","expect":"description must be a string","unmarshal":false}
+{"schema":"{\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": [\"Invalid\", \"description\"]\n\t\t\t\t}","expect":"description must be a string","unmarshal":false}
