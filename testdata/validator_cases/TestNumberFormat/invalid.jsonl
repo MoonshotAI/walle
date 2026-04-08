@@ -1,0 +1,7 @@
+{"schema":"{\"type\": \"number\", \"enum\": [1, 2, true]}","expect":"not a valid number","unmarshal":false}
+{"schema":"{\"type\": \"number\", \"enum\": [01.23]}","expect":"JSON schema parsing error","unmarshal":true}
+{"schema":"{\"type\": \"number\", \"enum\": [1, \"01\", 3]}","expect":"not a valid number","unmarshal":false}
+{"schema":"{\"type\": \"number\", \"enum\": [1, \"1e5\", 3]}","expect":"not a valid number","unmarshal":false}
+{"schema":"{\"type\": \"number\", \"enum\": [1, 1.7976931348623157e+309, 3]}","expect":"JSON schema parsing error","unmarshal":true}
+{"schema":"{\"type\": \"number\", \"enum\": [1, \"01.23\", 3]}","expect":"not a valid number","unmarshal":false}
+{"schema":"{\"type\": \"number\", \"enum\": [1, \"-01.23\", 3]}","expect":"not a valid number","unmarshal":false}

@@ -1,0 +1,6 @@
+{"schema":"{\"type\": []}","expect":"type array cannot be empty","unmarshal":false}
+{"schema":"{\"type\": [\"invalid\"]}","expect":"invalid type","unmarshal":false}
+{"schema":"{\"type\": [123]}","expect":"invalid type in type array","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": [\"object\"],\n\t\t\t\t\"minLength\": 5\n\t\t\t}","expect":"invalid keywords","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": [\"array\"],\n\t\t\t\t\"minimum\": 0\n\t\t\t}","expect":"invalid keywords","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": [\"string\"],\n\t\t\t\t\"minItems\": 1\n\t\t\t}","expect":"invalid keywords","unmarshal":false}

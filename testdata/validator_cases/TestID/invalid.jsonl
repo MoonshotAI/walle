@@ -1,0 +1,4 @@
+{"schema":"{\n\t\t\t\t\"$id\": 123,\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"$id must be a string","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$id\": [\"http://example.com\"],\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"$id must be a string","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$id\": {\"url\": \"http://example.com\"},\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"default\": {\"name\": \"John\"}\n\t\t\t}","expect":"$id must be a string","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"$id\": true,\n\t\t\t\t\"type\": \"object\"\n\t\t\t}","expect":"$id must be a string","unmarshal":false}

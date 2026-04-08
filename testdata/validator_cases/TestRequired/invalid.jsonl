@@ -1,0 +1,6 @@
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"name\": {\"type\": \"string\"}\n\t\t\t\t},\n\t\t\t\t\"required\": \"name\"\n\t\t\t}","expect":"required must be an array","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"name\": {\"type\": \"string\"}\n\t\t\t\t},\n\t\t\t\t\"required\": [\"name\", 123]\n\t\t\t}","expect":"items in required array must be strings","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"name\": {\"type\": \"string\"}\n\t\t\t\t},\n\t\t\t\t\"required\": [\"name\", \"\"]\n\t\t\t}","expect":"property names in required array cannot be empty","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"name\": {\"type\": \"string\"}\n\t\t\t\t},\n\t\t\t\t\"required\": [\"age\"]\n\t\t\t}","expect":"required property 'age' is not defined in properties","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"required\": [\"value\"]\n\t\t\t}","expect":"invalid keywords: required","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"required\": [\"name\"]\n\t\t\t}","expect":"'properties' keyword is missing","unmarshal":false}
