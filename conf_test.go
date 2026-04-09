@@ -185,3 +185,24 @@ func TestValidatorConfigOptions(t *testing.T) {
 		assert.Equal(t, 1000, config.MaxTotalPropertiesKeysNum)
 	})
 }
+
+func TestIsGreaterThanStrict(t *testing.T) {
+	cases := []struct {
+		level ValidateLevel
+		want  bool
+	}{
+		{ValidateLevelLoose, false},
+		{ValidateLevelLite, false},
+		{ValidateLevelStrict, true},
+		{ValidateLevelUltra, true},
+		{ValidateLevelDefault, true},
+		{ValidateLevelTest, true},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.level), func(t *testing.T) {
+			c := DefaultValidatorConfig()
+			WithValidateLevel(tc.level)(&c)
+			assert.Equal(t, tc.want, c.IsGreaterThanStrict())
+		})
+	}
+}

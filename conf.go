@@ -124,6 +124,10 @@ func (c *SchemaValidatorConfig) IsLoose() bool {
 	return c.ValidateLevel == ValidateLevelLoose
 }
 
+func (c *SchemaValidatorConfig) IsGreaterThanStrict() bool {
+	return c.IsStrict() || c.IsUltra() || c.IsTest()
+}
+
 // do not use in production
 func (c *SchemaValidatorConfig) IsTest() bool {
 	return c.ValidateLevel == ValidateLevelTest

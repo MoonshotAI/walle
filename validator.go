@@ -377,7 +377,7 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 				allowedEnum = true
 			}
 
-			if v.config.IsStrict() || v.config.IsUltra() || v.config.IsTest() {
+			if v.config.IsGreaterThanStrict() {
 				for k := range schema {
 					if path.IsRoot() {
 						if !TopLevelOnlyKeywords[k] && !CommonKeywords[k] && k != Type && !allowedEnum {
