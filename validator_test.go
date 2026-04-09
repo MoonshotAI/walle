@@ -672,3 +672,26 @@ func TestLiteAllowsMultipleTypesWithItems(t *testing.T) {
 		must.Contains(strings.ToLower(err.Error()), "multiple types")
 	}
 }
+
+func TestLiteAllowsReservedPropertyNamesInProperties(t *testing.T) {
+	must := require.New(t)
+	// properties 下存在名为 required 的字段（与 required 关键字同名）
+	schema := `{
+		"type": "object",
+		"properties": {
+			"required": { "type": "string", "description": "not the keyword" }
+		},
+		"additionalProperties": false
+	}`
+
+	lite := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+	must.NoError(lite.Validate(schema), "lite should allow reserved-looking property names")
+
+	loose := newSchemaValidator(WithValidateLevel(ValidateLevelLoose))
+	must.NoError(loose.Validate(schema), "loose should allow reserved-looking property names")
+
+	ultra := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+	err := ultra.Validate(schema)
+	must.Error(err, "ultra should reject reserved property names")
+	must.Contains(strings.ToLower(err.Error()), "reserved")
+}
