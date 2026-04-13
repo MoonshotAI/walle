@@ -54,7 +54,7 @@ func (v *keywordValidators) ValidateProperties(value any, context *validationCon
 			}
 		}
 
-		if InvalidPropertyNames[propName] {
+		if InvalidPropertyNames[propName] && v.config.IsGreaterThanStrict() {
 			return context.RaiseErrorWithSimplify(fmt.Sprintf("property name '%s' is reserved for JSON Schema keywords", propName), path, SimplifyRemoveSubSchema)
 		}
 
