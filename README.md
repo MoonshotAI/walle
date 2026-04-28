@@ -44,6 +44,9 @@ schema, err := walle.ParseSchema(schemaStr)
 err = schema.Validate()
 ...
 
+// Canonical JSON string
+canonicalJSON, warnErr := schema.Canonical()
+
 // Validate the schema with custom options
 err = schema.Validate(
     walle.WithValidateLevel(walle.ValidateLevelStrict),
@@ -52,7 +55,18 @@ err = schema.Validate(
 ```
 
 ### Python
-The Python interface provides a simple wrapper around the walle Go package. To use it, first build the shared library by running `./build.sh` in the `c-shared` directory, then refer to the implementation in `c-shared/walle.py` for usage details.
+The Python interface is packaged as `walle`. Release wheels include `libwalle.so`,
+so users can import it directly after installing the wheel.
+
+For local development, build the shared library before building or installing
+the package:
+
+```sh
+cd python/c-shared
+./build.sh
+cd ../..
+python -m pip wheel . -w dist --no-deps
+```
 
 Example:
 ```python
@@ -73,7 +87,9 @@ schema = '''
 }
 '''
 validator.validate_schema(schema)
-...
+
+# Canonical schema
+canonical_json, warning = validator.canonical_schema(schema)
 
 # With custom configuration
 config = {
@@ -81,5 +97,12 @@ config = {
     "maxEnumItems": 3
 }
 validator.validate_schema(schema, config)
-...
+```
+
+Tool-calling schema helpers:
+```python
+from walle import ms_tool_req_cvt, ms_tool_req_simplify
+
+internal_json = ms_tool_req_cvt(request)
+simplified_json, warnings = ms_tool_req_simplify(request)
 ```
