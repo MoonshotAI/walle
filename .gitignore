@@ -1,5 +1,10 @@
 *.so
+!python/walle/lib/*.so
 *.h
 *.log
 bin
 vendor
+build
+dist
+python/walle.egg-info/
+python/walle/__pycache__/

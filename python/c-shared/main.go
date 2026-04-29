@@ -43,6 +43,34 @@ func ValidateSchema(schemaStr *C.char, configStr *C.char) *C.char {
 	return C.CString(errMsg)
 }
 
+//export CanonicalSchema
+func CanonicalSchema(schemaStr *C.char) *C.char {
+	goSchemaStr := C.GoString(schemaStr)
+	type payload struct {
+		Error     string `json:"error,omitempty"`
+		Canonical string `json:"canonical,omitempty"`
+		Warning   string `json:"warning,omitempty"`
+	}
+	out := payload{}
+	schema, err := walle.ParseSchema(goSchemaStr)
+	if err != nil {
+		out.Error = err.Error()
+		b, _ := json.Marshal(out)
+		return C.CString(string(b))
+	}
+	canonicalStr, warnErr := schema.Canonical()
+	out.Canonical = canonicalStr
+	if warnErr != nil {
+		out.Warning = warnErr.Error()
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		out = payload{Error: fmt.Sprintf("marshal canonical response: %v", err)}
+		b, _ = json.Marshal(out)
+	}
+	return C.CString(string(b))
+}
+
 //export FreeErrString
 func FreeErrString(str *C.char) {
 	if str != nil {

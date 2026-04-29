@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "walle"
+version = "0.1.5"
+description = "Moonshot-flavored JSON schema validator"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{name = "Moonshot AI"}]
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+packages = ["walle"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.package-data]
+walle = ["lib/*.so"]

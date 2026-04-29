@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from walle import WalleValidator
 
 
@@ -16,6 +21,9 @@ def use_default_config():
     print("use default config")
     validator.validate_schema(valid_schema)
     print("case1: validate success!")
+    canon, warn = validator.canonical_schema(valid_schema)
+    print("canonical_schema:", canon)
+    print("canonical warning:", warn)
 
     # invalid case
     try:
@@ -52,7 +60,6 @@ def use_custom_config():
 def main():
     use_default_config()
     use_custom_config()
-
 
 if __name__ == "__main__":
     main()
