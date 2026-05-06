@@ -247,7 +247,8 @@ class _ToolSchemaPipeline:
             return copy.deepcopy(function)
 
         out = copy.deepcopy(function)
-        strict = bool(out.get("strict", True))
+        _strict = out.get("strict")
+        strict = True if _strict is None else bool(_strict)
         kwargs = out.get("kwargs")
         kwargs_list = kwargs if isinstance(kwargs, list) else []
 
