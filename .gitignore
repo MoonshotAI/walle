@@ -8,3 +8,4 @@ build
 dist
 python/walle.egg-info/
 python/walle/__pycache__/
+__pycache__

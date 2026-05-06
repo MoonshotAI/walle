@@ -57,3 +57,21 @@ jobs:
     - name: Run lint
       run: |
         golangci-lint run -v
+
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build libwalle.so and run Python tests
+        working-directory: python/c-shared
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: unittest (fork + CGO regression)
+        run: PYTHONPATH=python python3 -m unittest discover -s python/tests -v

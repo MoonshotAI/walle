@@ -2,6 +2,10 @@
 Provides conversion and simplification for tool-calling input.
 
 It prepares Moonshot-style tool definitions as an equivalent internal format.
+
+Concurrency: call ``ms_tool_req_simplify`` (and underlying ``WalleValidator``) from
+the **main thread** only; background ``threading`` workers can crash in CGO.
+Parallelism should use **processes** (see README: ``spawn``, fork hooks).
 """
 
 from __future__ import annotations
