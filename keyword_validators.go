@@ -431,7 +431,7 @@ func (v *keywordValidators) ValidateAnyOf(value any, context *validationContext,
 				return context.RaiseErrorWithSimplify(
 					fmt.Sprintf("keyword '%s' is not allowed at the same level as anyOf", key),
 					path.StringWithoutLast(),
-					SimplifyDefault,
+					SimplifyRemoveParentSchema,
 				)
 			}
 		}
@@ -571,7 +571,7 @@ func (v *keywordValidators) ValidateLengthRange(value any, context *validationCo
 				return err
 			}
 		default:
-			return context.RaiseErrorWithSimplify("minLength must be an integer", path, SimplifyDefault)
+			return context.RaiseErrorWithSimplify("minLength must be an integer", path, SimplifyRemoveConstraints)
 		}
 	}
 
@@ -586,7 +586,7 @@ func (v *keywordValidators) ValidateLengthRange(value any, context *validationCo
 				return err
 			}
 		default:
-			return context.RaiseErrorWithSimplify("maxLength must be an integer", path, SimplifyDefault)
+			return context.RaiseErrorWithSimplify("maxLength must be an integer", path, SimplifyRemoveConstraints)
 		}
 	}
 

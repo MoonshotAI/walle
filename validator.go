@@ -459,7 +459,7 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 			if len(invalidKeys) > 0 {
 				return v.context.RaiseErrorWithSimplify(
 					fmt.Sprintf("invalid keywords: %s", strings.Join(invalidKeys, ", ")),
-					path, SimplifyDefault,
+					path, SimplifyRemoveSchemaKeys(invalidKeys),
 				)
 			}
 		}

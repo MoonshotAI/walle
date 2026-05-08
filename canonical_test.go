@@ -1061,6 +1061,16 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 				}
 			}`,
 		},
+		{
+			name: "invalid_minLength_string_value",
+			invalidSchema: `{
+				"type": "string",
+				"minLength": "1"
+			}`,
+			simplifiedSchema: `{
+				"type": "string"
+			}`,
+		},
 	}
 
 	for _, tt := range tests {

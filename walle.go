@@ -18,6 +18,6 @@ func (s Schema) Validate(options ...SchemaValidatorOption) error {
 // It uses `strict` validation level, which is the most permissive level supported by the enforcer-server.
 // If the original schema has issues, it returns a simplified schema.
 func (s Schema) Canonical() (string, error) {
-	validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
 	return validator.CanonicalWithMaxAttempts(s, 20)
 }

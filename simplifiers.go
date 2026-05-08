@@ -120,6 +120,21 @@ func SimplifyDefault(schema Schema, _ schemaPath) Schema {
 	return schema
 }
 
+// deletes the given keys from the schema at path
+func SimplifyRemoveSchemaKeys(keys []string) SimplifyFunc {
+	keysCopy := append([]string(nil), keys...)
+	return func(schema Schema, path schemaPath) Schema {
+		current, err := extractSubSchema(schema, path)
+		if err != nil {
+			return make(Schema)
+		}
+		for _, k := range keysCopy {
+			delete(current, k)
+		}
+		return schema
+	}
+}
+
 func SimplifyRemoveProperties(schema Schema, path schemaPath) Schema {
 	// remove properties
 	err := removeAtPath(schema, path.Parent(), Properties, true)
