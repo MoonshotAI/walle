@@ -401,7 +401,7 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 				}
 			}
 
-			allowedKeywords, err := v.computeAllowedKeywordsForTypes(schema, path, types)
+			allowedKeywords, err := v.computeAllowedKeywordsForTypes(path, types)
 			if err != nil {
 				return err
 			}
@@ -420,13 +420,17 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 					path, SimplifyRemoveSchemaKeys(invalidKeys),
 				)
 			}
+
+			if err := v.validateRangeKeywordsForAllowedTypes(schema, path, allowedKeywords); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (v *schemaValidator) computeAllowedKeywordsForTypes(schema SchemaDict, path schemaPath, types []string) (map[string]struct{}, error) {
+func (v *schemaValidator) computeAllowedKeywordsForTypes(path schemaPath, types []string) (map[string]struct{}, error) {
 	allowedKeywords := make(map[string]struct{})
 	if path.IsRoot() {
 		for k := range TopLevelOnlyKeywords {
@@ -435,7 +439,7 @@ func (v *schemaValidator) computeAllowedKeywordsForTypes(schema SchemaDict, path
 	}
 
 	if len(types) == 1 {
-		allowed, err := v.allowedKeywordsForSingleType(schema, path, types[0])
+		allowed, err := v.allowedKeywordsForSingleType(types[0], path)
 		if err != nil {
 			return nil, err
 		}
@@ -447,7 +451,7 @@ func (v *schemaValidator) computeAllowedKeywordsForTypes(schema SchemaDict, path
 
 	var intersection map[string]bool
 	for _, schemaType := range types {
-		allowed, err := v.allowedKeywordsForSingleType(schema, path, schemaType)
+		allowed, err := v.allowedKeywordsForSingleType(schemaType, path)
 		if err != nil {
 			return nil, err
 		}
@@ -473,24 +477,15 @@ func (v *schemaValidator) computeAllowedKeywordsForTypes(schema SchemaDict, path
 	return allowedKeywords, nil
 }
 
-func (v *schemaValidator) allowedKeywordsForSingleType(schema SchemaDict, path schemaPath, schemaType string) (map[string]bool, error) {
+func (v *schemaValidator) allowedKeywordsForSingleType(schemaType string, path schemaPath) (map[string]bool, error) {
 	switch schemaType {
 	case Object:
 		return ObjectAllowedKeywords, nil
 	case Array:
-		if err := v.validateItemsRange(schema, v.context, path); err != nil {
-			return nil, err
-		}
 		return ArrayAllowedKeywords, nil
 	case String:
-		if err := v.validateLengthRange(schema, v.context, path); err != nil {
-			return nil, err
-		}
 		return StringAllowedKeywords, nil
 	case Number, Integer:
-		if err := v.validateNumericRange(schema, v.context, path); err != nil {
-			return nil, err
-		}
 		return NumberAllowedKeywords, nil
 	case Boolean:
 		return BooleanAllowedKeywords, nil
@@ -503,6 +498,40 @@ func (v *schemaValidator) allowedKeywordsForSingleType(schema SchemaDict, path s
 			SimplifyRemoveParentSchema,
 		)
 	}
+}
+
+func (v *schemaValidator) validateRangeKeywordsForAllowedTypes(schema SchemaDict, path schemaPath, allowedKeywords map[string]struct{}) error {
+	_, hasMinLength := schema[MinLength]
+	_, hasMaxLength := schema[MaxLength]
+	if hasMinLength || hasMaxLength {
+		if _, ok := allowedKeywords[MinLength]; ok {
+			if err := v.validateLengthRange(schema, v.context, path); err != nil {
+				return err
+			}
+		}
+	}
+
+	_, hasMinimum := schema[Minimum]
+	_, hasMaximum := schema[Maximum]
+	if hasMinimum || hasMaximum {
+		if _, ok := allowedKeywords[Minimum]; ok {
+			if err := v.validateNumericRange(schema, v.context, path); err != nil {
+				return err
+			}
+		}
+	}
+
+	_, hasMinItems := schema[MinItems]
+	_, hasMaxItems := schema[MaxItems]
+	if hasMinItems || hasMaxItems {
+		if _, ok := allowedKeywords[MinItems]; ok {
+			if err := v.validateItemsRange(schema, v.context, path); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // Validate validates a JSON schema
