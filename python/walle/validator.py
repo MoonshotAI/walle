@@ -27,6 +27,8 @@ def _open_walle_cdll(lib_path: str) -> ctypes.CDLL:
     lib.ValidateSchema.restype = ctypes.c_void_p
     lib.CanonicalSchema.argtypes = [ctypes.c_char_p]
     lib.CanonicalSchema.restype = ctypes.c_void_p
+    lib.FreeErrString.argtypes = [ctypes.c_void_p]
+    lib.FreeErrString.restype = None
     return lib
 
 

@@ -684,6 +684,18 @@ func TestUltraTypeArrayKeywordCheckPrecedesRangeValidation(t *testing.T) {
 	must.Contains(strings.ToLower(err.Error()), "invalid keywords: minimum")
 }
 
+func TestUltraUnsupportedKeywordsErrorOrderIsStable(t *testing.T) {
+	must := require.New(t)
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+	schema := `{"type":"object","zzz":1,"aaa":2}`
+
+	for i := 0; i < 30; i++ {
+		err := validator.Validate(schema)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "unsupported keywords: aaa, zzz")
+	}
+}
+
 func TestLiteAllowsMultipleTypesWithItems(t *testing.T) {
 	must := require.New(t)
 	schema := `{"additionalProperties": false, "properties": {"files": {"description": "List of files to read; request related files together when allowed", "items": {"additionalProperties": false, "properties": {"line_ranges": {"description": "Optional line ranges to read. Each range is a [start, end] tuple with 1-based inclusive line numbers. Use multiple ranges for non-contiguous sections.", "items": {"items": {"type": "integer"}, "maxItems": 2, "minItems": 2, "type": "array"}, "type": ["array", "null"]}, "path": {"description": "Path to the file to read, relative to the workspace", "type": "string"}}, "required": ["path", "line_ranges"], "type": "object"}, "minItems": 1, "type": "array"}}, "required": ["files"], "type": "object"}`

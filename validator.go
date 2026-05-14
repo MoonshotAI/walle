@@ -148,6 +148,7 @@ func (v *schemaValidator) TraverseSchema(schema SchemaDict, path schemaPath, cur
 	}
 
 	if len(unsupported) > 0 && (v.config.IsUltra() || v.config.IsTest()) {
+		sort.Strings(unsupported)
 		return currentDepth, v.context.RaiseErrorWithSimplify(fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")), path, SimplifyDefault)
 	}
 

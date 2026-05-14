@@ -11,7 +11,9 @@ Requires a built ``python/walle/lib/libwalle.so`` (see README / python/c-shared/
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import textwrap
 import unittest
 from typing import Tuple
 
@@ -93,6 +95,60 @@ class TestForkAfterLibwalleInit(unittest.TestCase):
 
         self.assertEqual(len(results), 4)
         self.assertTrue(all(r[0] > 0 for r in results))
+
+
+# Child program for ``TestFreeErrStringUnderMmapPressure``. Fresh ``python -c``
+# so ``MALLOC_MMAP_THRESHOLD_`` is honored from the child's first libc
+# allocation (glibc reads it once, before unittest's own heap traffic).
+_FREEERRSTRING_CHILD_CODE = textwrap.dedent(
+    """
+    from walle import WalleValidator
+
+    validator = WalleValidator()
+    validator.canonical_schema(
+        '{"type":"object","properties":{"x":{"type":"string"}}}'
+    )
+    print("OK", flush=True)
+    """
+)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "glibc malloc tunable, Linux only")
+@unittest.skipUnless(_lib_available(), "python/walle/lib/libwalle.so missing (run python/c-shared/build.sh)")
+class TestFreeErrStringUnderMmapPressure(unittest.TestCase):
+    """``FreeErrString`` must keep ``argtypes=[c_void_p]`` under high-VA cgo allocs.
+
+    When ``C.CString`` returns an address ``>= 2**31``, omitting those ctypes
+    lines (historic v0.1.6) caused pointer truncation → SIGSEGV in ``free``.
+    Normal desktops often allocate below ``2**31``, so CI forces mmap-heavy
+    glibc behaviour via ``MALLOC_MMAP_THRESHOLD_=1``. A/B against the broken
+    binding lives in ``python/c-shared/repro_freeerrstring_truncation.py``
+    (--mode v016 vs head); this unittest only asserts the packaged binding survives.
+    """
+
+    def test_binding_survives_under_mmap_pressure(self) -> None:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            [p for p in sys.path if p] + [env.get("PYTHONPATH", "")]
+        )
+        env["MALLOC_MMAP_THRESHOLD_"] = "1"
+        env["MALLOC_MMAP_MAX_"] = str((1 << 31) - 1)
+
+        result = subprocess.run(
+            [sys.executable, "-c", _FREEERRSTRING_CHILD_CODE],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60.0,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            "expected success under mmap pressure; if this fails after editing "
+            f"validator._open_walle_cdll FreeErrString lines, revisit ctypes. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
+        self.assertIn("OK", result.stdout)
 
 
 if __name__ == "__main__":
