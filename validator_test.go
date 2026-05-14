@@ -658,6 +658,32 @@ func TestUltraValidate(t *testing.T) {
 	}
 }
 
+func TestUltraTypeArrayKeywordValidationIsOrderIndependent(t *testing.T) {
+	must := require.New(t)
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+
+	schemas := []string{
+		`{"type":["integer","string"],"enum":[1,"a"],"minimum":0}`,
+		`{"type":["string","integer"],"enum":[1,"a"],"minimum":0}`,
+	}
+
+	for _, schema := range schemas {
+		err := validator.Validate(schema)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "invalid keywords: minimum")
+	}
+}
+
+func TestUltraTypeArrayKeywordCheckPrecedesRangeValidation(t *testing.T) {
+	must := require.New(t)
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+
+	schema := `{"type":["string","integer"],"enum":[1,"a"],"minimum":"x"}`
+	err := validator.Validate(schema)
+	must.Error(err)
+	must.Contains(strings.ToLower(err.Error()), "invalid keywords: minimum")
+}
+
 func TestUltraUnsupportedKeywordsErrorOrderIsStable(t *testing.T) {
 	must := require.New(t)
 	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
