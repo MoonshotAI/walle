@@ -80,10 +80,10 @@ func (v *schemaValidator) CheckAnyOfConflicts(schema SchemaDict, path schemaPath
 		return nil
 	}
 
-	// Get outer keywords (excluding common keywords and anyOf itself)
+	// Get outer keywords (excluding anyOf itself)
 	outerKeywords := make(map[string]struct{})
 	for k := range schema {
-		if k != AnyOf && k != Description && k != Title {
+		if k != AnyOf {
 			outerKeywords[k] = struct{}{}
 		}
 	}
@@ -103,23 +103,27 @@ func (v *schemaValidator) CheckAnyOfConflicts(schema SchemaDict, path schemaPath
 		// Check branch keywords against outer keywords
 		branchKeywords := make(map[string]struct{})
 		for k := range schemaObj {
-			if k != Description && k != Title {
-				branchKeywords[k] = struct{}{}
-			}
+			branchKeywords[k] = struct{}{}
 		}
 
 		var conflicts []string
 		for k := range branchKeywords {
 			if _, exists := outerKeywords[k]; exists {
+				if CommonKeywords[k] && !(v.config.IsUltra() || v.config.IsTest()) {
+					continue
+				}
 				conflicts = append(conflicts, k)
 			}
 		}
 
 		if len(conflicts) > 0 {
+			sort.Strings(conflicts)
 			return v.context.RaiseErrorWithSimplify(
-				fmt.Sprintf("conflicting keywords found in anyOf with parent: %s",
-					strings.Join(conflicts, ", ")),
-				path, SimplifyRemoveParentSchema,
+				fmt.Sprintf(
+					`conflicting keywords found in anyOf with parent: keywords (%s) are defined on the parent schema and inside anyOf; remove them from the parent or from anyOf branches`,
+					strings.Join(conflicts, ", "),
+				),
+				path, simplifyFuncForKeywordConflicts(conflicts),
 			)
 		}
 	}
@@ -1024,6 +1028,8 @@ func (v *schemaValidator) ExpandRef(schema SchemaDict, visitedRefs map[string]st
 
 	// Keep expanding if only contains $ref and common keywords
 	keepKeys := make(SchemaDict)
+	currentLayerRef := refValue
+	previousLayerRef := ""
 	for {
 		if currentResolved[Ref] == nil {
 			break
@@ -1066,19 +1072,38 @@ func (v *schemaValidator) ExpandRef(schema SchemaDict, visitedRefs map[string]st
 		for k := range currentResolved {
 			if CommonKeywords[k] {
 				if _, exists := keepKeys[k]; exists {
-					return nil, v.context.RaiseErrorWithSimplify(
-						fmt.Sprintf("conflicting keywords found after $ref expansion: %s", k),
-						path, SimplifyRemoveParentSchema,
-					)
+					if v.config.IsUltra() || v.config.IsTest() {
+						simplifyPath := path
+						outerRef := previousLayerRef
+						if outerRef == "" {
+							outerRef = currentLayerRef
+						}
+						if defsPath, err := refToSchemaPath(outerRef); err == nil {
+							simplifyPath = defsPath
+						}
+						return nil, v.context.RaiseErrorWithSimplify(
+							fmt.Sprintf(
+								`conflicting keywords found after $ref expansion: keyword %q appears at multiple levels in a chained "$ref"; keep it in only one place`,
+								k,
+							),
+							simplifyPath, simplifyFuncForKeywordConflicts([]string{k}),
+						)
+					}
+					continue
 				}
 				keepKeys[k] = currentResolved[k]
 			}
 		}
 
+		previousLayerRef = currentLayerRef
+		currentLayerRef = nextRef
 		currentResolved = nextResolved
 	}
 
-	result := currentResolved
+	result := make(SchemaDict, len(currentResolved)+len(keepKeys))
+	for k, v := range currentResolved {
+		result[k] = v
+	}
 	for k, v := range keepKeys {
 		result[k] = v
 	}
@@ -1103,13 +1128,22 @@ func (v *schemaValidator) CheckRefContext(parent SchemaDict, refSchema SchemaDic
 	var conflicts []string
 	for k := range refSchema {
 		if _, exists := parentKeywords[k]; exists {
+			if CommonKeywords[k] && !(v.config.IsUltra() || v.config.IsTest()) {
+				continue
+			}
 			conflicts = append(conflicts, k)
 		}
 	}
 
 	if len(conflicts) > 0 {
 		sort.Strings(conflicts)
-		return v.context.RaiseErrorWithSimplify(fmt.Sprintf("conflicting keywords found after $ref expansion: %s", strings.Join(conflicts, ", ")), path, SimplifyRemoveParentSchema)
+		return v.context.RaiseErrorWithSimplify(
+			fmt.Sprintf(
+				`conflicting keywords found after $ref expansion: keywords (%s) are defined both alongside "$ref" and in the referenced schema; remove the duplicates`,
+				strings.Join(conflicts, ", "),
+			),
+			path, simplifyFuncForKeywordConflicts(conflicts),
+		)
 	}
 
 	// Validate if the parent schema is valid after ref expansion
@@ -1134,21 +1168,28 @@ func (v *schemaValidator) CheckRefContext(parent SchemaDict, refSchema SchemaDic
 				// Check if keywords in each anyOf branch conflict with parent
 				branchKeywords := make(map[string]struct{})
 				for k := range branch {
-					if k != Description && k != Title {
-						branchKeywords[k] = struct{}{}
-					}
+					branchKeywords[k] = struct{}{}
 				}
 
 				var branchConflicts []string
 				for k := range parentKeywords {
-					if _, exists := branchKeywords[k]; exists && k != AnyOf && k != Description && k != Title {
+					if _, exists := branchKeywords[k]; exists && k != AnyOf {
+						if CommonKeywords[k] && !(v.config.IsUltra() || v.config.IsTest()) {
+							continue
+						}
 						branchConflicts = append(branchConflicts, k)
 					}
 				}
 
 				if len(branchConflicts) > 0 {
 					sort.Strings(branchConflicts)
-					return v.context.RaiseErrorWithSimplify(fmt.Sprintf("conflicting keywords found in anyOf after ref expansion: %s", strings.Join(branchConflicts, ", ")), path, SimplifyRemoveParentSchema)
+					return v.context.RaiseErrorWithSimplify(
+						fmt.Sprintf(
+							`conflicting keywords found in anyOf after ref expansion: keywords (%s) are defined alongside "$ref" and inside anyOf in the referenced schema; define them in only one place`,
+							strings.Join(branchConflicts, ", "),
+						),
+						path, simplifyFuncForKeywordConflicts(branchConflicts),
+					)
 				}
 			}
 		}

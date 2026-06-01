@@ -579,6 +579,233 @@ func TestCheckRefContext(t *testing.T) {
 	})
 }
 
+func TestRefCommonKeywordConflictByValidateLevel(t *testing.T) {
+	schemaWithDuplicateDescription := `{
+		"type": "object",
+		"properties": {
+			"variantOptions": {
+				"$ref": "#/$defs/VariantOptions",
+				"description": "property-level description"
+			}
+		},
+		"$defs": {
+			"VariantOptions": {
+				"type": "array",
+				"description": "defs-level description"
+			}
+		}
+	}`
+
+	t.Run("lite allows duplicate description after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithDuplicateDescription))
+	})
+
+	t.Run("strict allows duplicate description after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
+		must.NoError(validator.Validate(schemaWithDuplicateDescription))
+	})
+
+	t.Run("ultra rejects duplicate description after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		err := validator.Validate(schemaWithDuplicateDescription)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "description")
+	})
+
+	t.Run("lite still rejects structural keyword conflicts after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		schema := `{
+			"type": "object",
+			"properties": {
+				"value": {
+					"$ref": "#/$defs/ValueType",
+					"type": "string"
+				}
+			},
+			"$defs": {
+				"ValueType": { "type": "number" }
+			}
+		}`
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		err := validator.Validate(schema)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "type")
+	})
+
+	schemaWithAnyOfParentDescriptionConflict := `{
+		"type": "object",
+		"properties": {
+			"name": {
+				"description": "outer description",
+				"anyOf": [
+					{ "type": "string", "description": "branch description" }
+				]
+			}
+		}
+	}`
+
+	t.Run("lite allows duplicate description in anyOf with parent", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithAnyOfParentDescriptionConflict))
+	})
+
+	t.Run("ultra rejects duplicate description in anyOf with parent", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		err := validator.Validate(schemaWithAnyOfParentDescriptionConflict)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "description")
+	})
+
+	schemaWithRefAnyOfBranchDescriptionConflict := `{
+		"type": "object",
+		"properties": {
+			"name": {
+				"$ref": "#/$defs/Foo",
+				"description": "outer description"
+			}
+		},
+		"$defs": {
+			"Foo": {
+				"anyOf": [
+					{ "type": "string", "description": "branch description" }
+				]
+			}
+		}
+	}`
+
+	t.Run("lite allows duplicate description in anyOf after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithRefAnyOfBranchDescriptionConflict))
+	})
+
+	t.Run("ultra rejects duplicate description in anyOf after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		err := validator.Validate(schemaWithRefAnyOfBranchDescriptionConflict)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "description")
+	})
+
+	schemaWithChainedRefDescriptionConflict := `{
+		"type": "object",
+		"properties": {
+			"foo": { "$ref": "#/$defs/DoubleNested" }
+		},
+		"$defs": {
+			"Simple": { "type": "string" },
+			"Nested": {
+				"$ref": "#/$defs/Simple",
+				"description": "level 1 description"
+			},
+			"DoubleNested": {
+				"$ref": "#/$defs/Nested",
+				"description": "level 2 description"
+			}
+		}
+	}`
+
+	t.Run("lite allows duplicate description in chained ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithChainedRefDescriptionConflict))
+	})
+
+	t.Run("ultra rejects duplicate description in chained ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		err := validator.Validate(schemaWithChainedRefDescriptionConflict)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "description")
+		must.Contains(strings.ToLower(err.Error()), "chained")
+	})
+
+	schemaWithDuplicateTitle := `{
+		"type": "object",
+		"properties": {
+			"foo": {
+				"$ref": "#/$defs/Foo",
+				"title": "outer title"
+			}
+		},
+		"$defs": {
+			"Foo": { "type": "string", "title": "inner title" }
+		}
+	}`
+
+	t.Run("lite allows duplicate title after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithDuplicateTitle))
+	})
+
+	t.Run("ultra rejects duplicate title after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		err := validator.Validate(schemaWithDuplicateTitle)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "title")
+	})
+
+	schemaWithAnyOfParentMinLengthConflict := `{
+		"type": "object",
+		"properties": {
+			"name": {
+				"minLength": 20,
+				"anyOf": [
+					{ "type": "string", "minLength": 10 }
+				]
+			}
+		}
+	}`
+
+	t.Run("lite still rejects structural keyword conflict in anyOf with parent", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		err := validator.Validate(schemaWithAnyOfParentMinLengthConflict)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "minlength")
+	})
+
+	schemaWithRefAnyOfBranchMinLengthConflict := `{
+		"type": "object",
+		"properties": {
+			"name": {
+				"$ref": "#/$defs/Foo",
+				"minLength": 20
+			}
+		},
+		"$defs": {
+			"Foo": {
+				"anyOf": [
+					{ "type": "string", "minLength": 10 }
+				]
+			}
+		}
+	}`
+
+	t.Run("lite still rejects structural keyword conflict in anyOf after ref expansion", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		err := validator.Validate(schemaWithRefAnyOfBranchMinLengthConflict)
+		must.Error(err)
+		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+		must.Contains(strings.ToLower(err.Error()), "minlength")
+	})
+}
+
 func TestMakeSubSchema(t *testing.T) {
 	must := require.New(t)
 
