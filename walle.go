@@ -15,7 +15,7 @@ func (s Schema) Validate(options ...SchemaValidatorOption) error {
 }
 
 // Canonical returns a schema representation that conforms to Moonshot AI server requirements.
-// It uses `strict` validation level, which is the most permissive level supported by the enforcer-server.
+// It uses `ultra` validation level, which is the most permissive level supported by the enforcer-server.
 // If the original schema has issues, it returns a simplified schema.
 func (s Schema) Canonical() (string, error) {
 	validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))

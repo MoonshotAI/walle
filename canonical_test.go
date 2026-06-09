@@ -1104,3 +1104,481 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalCommonKeywordConflictSimplify(t *testing.T) {
+	tests := []struct {
+		name             string
+		invalidSchema    string
+		simplifiedSchema string
+	}{
+		{
+			name: "ref_expansion_removes_outer_description_only",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"variantOptions": {
+						"$ref": "#/$defs/VariantOptions",
+						"description": "property-level description"
+					}
+				},
+				"$defs": {
+					"VariantOptions": {
+						"type": "array",
+						"description": "defs-level description"
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"variantOptions": {
+						"$ref": "#/$defs/VariantOptions"
+					}
+				},
+				"$defs": {
+					"VariantOptions": {
+						"type": "array",
+						"description": "defs-level description"
+					}
+				}
+			}`,
+		},
+		{
+			name: "anyOf_with_parent_removes_outer_description_only",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {
+						"description": "outer description",
+						"anyOf": [
+							{ "type": "string", "description": "branch description" }
+						]
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {
+						"anyOf": [
+							{ "type": "string", "description": "branch description" }
+						]
+					}
+				}
+			}`,
+		},
+		{
+			name: "anyOf_after_ref_expansion_removes_outer_description_only",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {
+						"$ref": "#/$defs/Foo",
+						"description": "outer description"
+					}
+				},
+				"$defs": {
+					"Foo": {
+						"anyOf": [
+							{ "type": "string", "description": "branch description" }
+						]
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {
+						"$ref": "#/$defs/Foo"
+					}
+				},
+				"$defs": {
+					"Foo": {
+						"anyOf": [
+							{ "type": "string", "description": "branch description" }
+						]
+					}
+				}
+			}`,
+		},
+		{
+			name: "chained_ref_removes_outer_defs_description_only",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/DoubleNested" }
+				},
+				"$defs": {
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "level 1 description"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested",
+						"description": "level 2 description"
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/DoubleNested" }
+				},
+				"$defs": {
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "level 1 description"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested"
+					}
+				}
+			}`,
+		},
+		{
+			name: "title_conflict_removes_outer_title_only",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": {
+						"$ref": "#/$defs/Foo",
+						"title": "outer title"
+					}
+				},
+				"$defs": {
+					"Foo": { "type": "string", "title": "inner title" }
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/Foo" }
+				},
+				"$defs": {
+					"Foo": { "type": "string", "title": "inner title" }
+				}
+			}`,
+		},
+		{
+			name: "description_and_title_conflict_removes_both_outer_keys",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": {
+						"$ref": "#/$defs/Foo",
+						"description": "outer description",
+						"title": "outer title"
+					}
+				},
+				"$defs": {
+					"Foo": {
+						"type": "string",
+						"description": "inner description",
+						"title": "inner title"
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/Foo" }
+				},
+				"$defs": {
+					"Foo": {
+						"type": "string",
+						"description": "inner description",
+						"title": "inner title"
+					}
+				}
+			}`,
+		},
+		{
+			name: "mixed_structural_conflict_still_clears_parent_sub_schema",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {
+						"description": "xxx",
+						"minLength": 20,
+						"anyOf": [
+							{ "type": "string", "description": "yyy", "minLength": 10 }
+						]
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"name": {}
+				}
+			}`,
+		},
+		{
+			name: "multiple_property_conflicts_are_fixed_across_rounds",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"a": {
+						"$ref": "#/$defs/A",
+						"description": "outer a"
+					},
+					"b": {
+						"$ref": "#/$defs/B",
+						"description": "outer b"
+					}
+				},
+				"$defs": {
+					"A": { "type": "string", "description": "inner a" },
+					"B": { "type": "number", "description": "inner b" }
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"a": { "$ref": "#/$defs/A" },
+					"b": { "$ref": "#/$defs/B" }
+				},
+				"$defs": {
+					"A": { "type": "string", "description": "inner a" },
+					"B": { "type": "number", "description": "inner b" }
+				}
+			}`,
+		},
+		{
+			name: "triple_chained_ref_requires_multiple_simplify_rounds",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/TripleNested" }
+				},
+				"$defs": {
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "level 1 description"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested",
+						"description": "level 2 description"
+					},
+					"TripleNested": {
+						"$ref": "#/$defs/DoubleNested",
+						"description": "level 3 description"
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"foo": { "$ref": "#/$defs/TripleNested" }
+				},
+				"$defs": {
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "level 1 description"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested"
+					},
+					"TripleNested": {
+						"$ref": "#/$defs/DoubleNested"
+					}
+				}
+			}`,
+		},
+		{
+			name: "combined_ref_anyof_chained_common_keyword_conflicts",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"variantOptions": {
+						"$ref": "#/$defs/VariantOptions",
+						"description": "prop variant outer desc",
+						"title": "prop variant outer title"
+					},
+					"contact": {
+						"description": "contact outer desc",
+						"title": "contact outer title",
+						"anyOf": [
+							{
+								"type": "string",
+								"description": "contact branch desc",
+								"title": "contact branch title"
+							},
+							{
+								"type": "object",
+								"description": "contact obj branch desc"
+							}
+						]
+					},
+					"profile": {
+						"$ref": "#/$defs/Profile",
+						"description": "profile outer desc"
+					},
+					"chained": {
+						"$ref": "#/$defs/TripleNested"
+					}
+				},
+				"$defs": {
+					"VariantOptions": {
+						"type": "array",
+						"description": "defs variant inner desc",
+						"title": "defs variant inner title"
+					},
+					"Profile": {
+						"anyOf": [
+							{
+								"type": "string",
+								"description": "profile branch desc",
+								"minLength": 1
+							},
+							{ "type": "number" }
+						]
+					},
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "chain level 1 desc",
+						"title": "chain level 1 title"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested",
+						"description": "chain level 2 desc",
+						"title": "chain level 2 title"
+					},
+					"TripleNested": {
+						"$ref": "#/$defs/DoubleNested",
+						"description": "chain level 3 desc",
+						"title": "chain level 3 title"
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"variantOptions": {
+						"$ref": "#/$defs/VariantOptions"
+					},
+					"contact": {
+						"anyOf": [
+							{
+								"type": "string",
+								"description": "contact branch desc",
+								"title": "contact branch title"
+							},
+							{
+								"type": "object",
+								"description": "contact obj branch desc"
+							}
+						]
+					},
+					"profile": {
+						"$ref": "#/$defs/Profile"
+					},
+					"chained": {
+						"$ref": "#/$defs/TripleNested"
+					}
+				},
+				"$defs": {
+					"VariantOptions": {
+						"type": "array",
+						"description": "defs variant inner desc",
+						"title": "defs variant inner title"
+					},
+					"Profile": {
+						"anyOf": [
+							{
+								"type": "string",
+								"description": "profile branch desc",
+								"minLength": 1
+							},
+							{ "type": "number" }
+						]
+					},
+					"Simple": { "type": "string" },
+					"Nested": {
+						"$ref": "#/$defs/Simple",
+						"description": "chain level 1 desc",
+						"title": "chain level 1 title"
+					},
+					"DoubleNested": {
+						"$ref": "#/$defs/Nested"
+					},
+					"TripleNested": {
+						"$ref": "#/$defs/DoubleNested"
+					}
+				}
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema, err := ParseSchema(tt.invalidSchema)
+			if err != nil {
+				t.Fatalf("Failed to parse schema: %v", err)
+			}
+
+			result, _ := schema.Canonical()
+			fixedSchema, err := ParseSchema(result)
+			if err != nil {
+				t.Errorf("Fixed schema is not valid JSON: %v", err)
+				return
+			}
+
+			expectedSchema, err := ParseSchema(tt.simplifiedSchema)
+			if err != nil {
+				t.Errorf("Failed to parse simplified schema: %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(expectedSchema, fixedSchema) {
+				t.Errorf("Expected simplified schema: %s, but got: %s", expectedSchema, fixedSchema)
+			}
+
+			validator := newSchemaValidator(WithValidateLevel(ValidateLevelStrict))
+			if err := validator.Validate(fixedSchema); err != nil {
+				t.Errorf("Fixed schema should pass validation but failed: %v", err)
+			}
+		})
+	}
+
+	t.Run("exceeding_max_attempts_returns_empty_schema", func(t *testing.T) {
+		schema, err := ParseSchema(`{
+			"type": "object",
+			"properties": {
+				"foo": { "$ref": "#/$defs/TripleNested" }
+			},
+			"$defs": {
+				"Simple": { "type": "string" },
+				"Nested": {
+					"$ref": "#/$defs/Simple",
+					"description": "level 1 description"
+				},
+				"DoubleNested": {
+					"$ref": "#/$defs/Nested",
+					"description": "level 2 description"
+				},
+				"TripleNested": {
+					"$ref": "#/$defs/DoubleNested",
+					"description": "level 3 description"
+				}
+			}
+		}`)
+		if err != nil {
+			t.Fatalf("Failed to parse schema: %v", err)
+		}
+
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
+		result, rawErr := validator.CanonicalWithMaxAttempts(schema, 1)
+		if rawErr == nil {
+			t.Fatal("expected validation error")
+		}
+		if result != "{}" {
+			t.Errorf("Expected {}, but got: %s", result)
+		}
+	})
+}

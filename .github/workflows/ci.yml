@@ -19,7 +19,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        go install github.com/boumenot/gocover-cobertura@latest
+        go install github.com/boumenot/gocover-cobertura@v1.4.0
         go install gotest.tools/gotestsum@v1.12.2
 
     - name: Run tests

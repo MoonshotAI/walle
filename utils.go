@@ -97,6 +97,20 @@ func (u *validateUtils) CalculateSchemaSize(schema SchemaDict) int {
 	return len(bytes)
 }
 
+func refToSchemaPath(ref string) (schemaPath, error) {
+	if ref == "#" {
+		return rootSchemaPath, nil
+	}
+	if !strings.HasPrefix(ref, "#") {
+		return schemaPath{}, fmt.Errorf("invalid ref: %s", ref)
+	}
+	parts := strings.Split(ref[2:], "/")
+	if len(parts) == 0 {
+		return rootSchemaPath, nil
+	}
+	return newSchemaPathFromParts(parts), nil
+}
+
 // GetRefPathParts parses $ref path
 func (u *validateUtils) GetRefPathParts(ref string, context *validationContext, path schemaPath) ([]string, error) {
 	if ref == "#" {

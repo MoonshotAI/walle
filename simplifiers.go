@@ -135,6 +135,21 @@ func SimplifyRemoveSchemaKeys(keys []string) SimplifyFunc {
 	}
 }
 
+// Pure description/title conflicts remove only those keys at the error path (outer layer).
+func simplifyFuncForKeywordConflicts(conflicts []string) SimplifyFunc {
+	commonKeys := make([]string, 0, len(conflicts))
+	for _, k := range conflicts {
+		if !CommonKeywords[k] {
+			return SimplifyRemoveParentSchema
+		}
+		commonKeys = append(commonKeys, k)
+	}
+	if len(commonKeys) == 0 {
+		return SimplifyRemoveParentSchema
+	}
+	return SimplifyRemoveSchemaKeys(commonKeys)
+}
+
 func SimplifyRemoveProperties(schema Schema, path schemaPath) Schema {
 	// remove properties
 	err := removeAtPath(schema, path.Parent(), Properties, true)
