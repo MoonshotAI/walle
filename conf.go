@@ -25,13 +25,13 @@ type SchemaValidatorConfig struct {
 func DefaultValidatorConfig() SchemaValidatorConfig {
 	return SchemaValidatorConfig{
 		ValidateLevel:               ValidateLevelDefault,
-		MaxEnumItems:                500,
-		MaxEnumStringLength:         7500,
-		MaxEnumStringCheckThreshold: 250,
-		MaxAnyOfItems:               100,
-		MaxSchemaDepth:              10,
-		MaxSchemaSize:               15000,
-		MaxTotalPropertiesKeysNum:   1000,
+		MaxEnumItems:                1000,
+		MaxEnumStringLength:         75000,
+		MaxEnumStringCheckThreshold: 2500,
+		MaxAnyOfItems:               500,
+		MaxSchemaDepth:              30,
+		MaxSchemaSize:               120000,
+		MaxTotalPropertiesKeysNum:   3000,
 	}
 }
 

@@ -215,20 +215,20 @@ func TestEnumStringLength(t *testing.T) {
 	}{
 		// More than 250 values and long string
 		{
-			createEnumJSON("very_loooooooooooong_enum_value_", 251),
-			"total string length of enum values",
+			createEnumJSON("very_loooooooooooong_enum_value_", 1001),
+			"enum array cannot have more than 1000 items",
 			false,
 		},
 		// Numeric type but value is too large
 		{
-			createLargeNumericEnumJSON(123456789010.123456789, 499),
-			"total string length of enum values",
+			createLargeNumericEnumJSON(123456789010.123456789, 1001),
+			"enum array cannot have more than 1000 items",
 			false,
 		},
 		// Integer type but value is too large
 		{
-			createLargeIntegerEnumJSON((1<<53)-1, 499),
-			"total string length of enum values",
+			createLargeIntegerEnumJSON((1<<53)-1, 1001),
+			"enum array cannot have more than 1000 items",
 			false,
 		},
 	}
@@ -355,10 +355,10 @@ func TestSchemaValidatorWithCustomConfig(t *testing.T) {
 		must.Equal(30000, validator.config.MaxSchemaSize)
 
 		// Default values for others
-		must.Equal(7500, validator.config.MaxEnumStringLength)
-		must.Equal(250, validator.config.MaxEnumStringCheckThreshold)
-		must.Equal(100, validator.config.MaxAnyOfItems)
-		must.Equal(1000, validator.config.MaxTotalPropertiesKeysNum)
+		must.Equal(75000, validator.config.MaxEnumStringLength)
+		must.Equal(2500, validator.config.MaxEnumStringCheckThreshold)
+		must.Equal(500, validator.config.MaxAnyOfItems)
+		must.Equal(3000, validator.config.MaxTotalPropertiesKeysNum)
 	})
 
 	t.Run("MaxEnumStringLength and MaxEnumStringCheckThreshold limit", func(t *testing.T) {
