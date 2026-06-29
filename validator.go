@@ -153,7 +153,14 @@ func (v *schemaValidator) TraverseSchema(schema SchemaDict, path schemaPath, cur
 
 	if len(unsupported) > 0 && (v.config.IsUltra() || v.config.IsTest()) {
 		sort.Strings(unsupported)
-		return currentDepth, v.context.RaiseErrorWithSimplify(fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")), path, SimplifyDefault)
+		simplifyFunc := SimplifyDefault
+		for _, keyword := range unsupported {
+			if keyword == "$schema" {
+				simplifyFunc = SimplifyRemoveSchemaKeys([]string{"$schema"})
+				break
+			}
+		}
+		return currentDepth, v.context.RaiseErrorWithSimplify(fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")), path, simplifyFunc)
 	}
 
 	// Process $defs first
