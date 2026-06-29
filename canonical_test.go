@@ -2,6 +2,7 @@ package walle
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -1581,4 +1582,84 @@ func TestCanonicalCommonKeywordConflictSimplify(t *testing.T) {
 			t.Errorf("Expected {}, but got: %s", result)
 		}
 	})
+}
+
+func TestCanonicalRemovesSchemaKeywordOnly(t *testing.T) {
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"properties": {
+			"command": {
+				"type": "string",
+				"$schema": "https://json-schema.org/draft/2020-12/schema"
+			}
+		},
+		"required": ["command"]
+	}`)
+	if err != nil {
+		t.Fatalf("Failed to parse schema: %v", err)
+	}
+
+	result, warnErr := schema.Canonical()
+	if warnErr == nil {
+		t.Fatal("expected warning after simplifying $schema")
+	}
+	if result == "{}" {
+		t.Fatalf("expected schema to be preserved, got empty object")
+	}
+
+	fixed, err := ParseSchema(result)
+	if err != nil {
+		t.Fatalf("Fixed schema is not valid JSON: %v", err)
+	}
+	if _, ok := fixed["$schema"]; ok {
+		t.Error("root $schema should be removed")
+	}
+	if fixed["type"] != "object" {
+		t.Errorf("type should remain, got %v", fixed["type"])
+	}
+	props, ok := fixed["properties"].(map[string]any)
+	if !ok || props["command"] == nil {
+		t.Error("properties.command should remain")
+	}
+	command, ok := props["command"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties.command should be a schema, got %T", props["command"])
+	}
+	if _, ok := command["$schema"]; ok {
+		t.Error("nested $schema should be removed")
+	}
+	if command["type"] != "string" {
+		t.Errorf("nested type should remain, got %v", command["type"])
+	}
+	required, ok := fixed["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "command" {
+		t.Errorf("required should remain, got %v", fixed["required"])
+	}
+}
+
+func TestCanonicalDoesNotSimplifyOtherUnsupportedKeywordsWithSchema(t *testing.T) {
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"zzz": true,
+		"properties": {
+			"command": { "type": "string" }
+		},
+		"required": ["command"]
+	}`)
+	if err != nil {
+		t.Fatalf("Failed to parse schema: %v", err)
+	}
+
+	result, warnErr := schema.Canonical()
+	if warnErr == nil {
+		t.Fatal("expected warning for unsupported keywords")
+	}
+	if !strings.Contains(warnErr.Error(), "unsupported keywords: $schema, zzz") {
+		t.Fatalf("expected warning to include both unsupported keywords, got %v", warnErr)
+	}
+	if result != "{}" {
+		t.Fatalf("expected other unsupported keywords to keep original fallback behavior, got %s", result)
+	}
 }
