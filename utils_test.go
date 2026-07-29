@@ -1,6 +1,7 @@
 package walle
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -902,4 +903,358 @@ func TestSchemaPath(t *testing.T) {
 	// Test with empty path
 	modifiedEmptyPath := emptyPath.ModifyAnyOfPart(0)
 	must.Equal([]string{}, modifiedEmptyPath.Parts, "Empty path should remain empty")
+}
+
+// toolCallSchemaWithPropertyRefs mirrors a real tool definition that reuses a
+// property schema through a plain JSON Schema pointer instead of $defs.
+const toolCallSchemaWithPropertyRefs = `{
+	"type": "object",
+	"properties": {
+		"current_step": {
+			"type": "string",
+			"minLength": 1,
+			"description": "Major step or phase you are on."
+		},
+		"final_summary": {
+			"$ref": "#/properties/current_step",
+			"description": "User-facing executive summary."
+		},
+		"completed_subtitle": {
+			"$ref": "#/properties/current_step",
+			"description": "4-6 word, past-tense, final summary."
+		}
+	}
+}`
+
+// canonicalOf requires the schema to canonicalize without any simplification,
+// which is what makes hoisting a lossless rewrite rather than a repair.
+func canonicalOf(t *testing.T, raw string) SchemaDict {
+	t.Helper()
+	must := require.New(t)
+
+	schema, err := ParseSchema(raw)
+	must.NoError(err)
+
+	out, rawErr := schema.Canonical()
+	must.NoError(rawErr, "schema should be canonical without any simplification")
+
+	var result SchemaDict
+	must.NoError(json.Unmarshal([]byte(out), &result))
+	return result
+}
+
+func defNameOf(ref string) string {
+	return ref[len("#/"+Defs+"/"):]
+}
+
+func TestHoistLocalRefsMovesPropertyPointerIntoDefs(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, toolCallSchemaWithPropertyRefs)
+
+	// Two sites, one pointer: the definition is shared.
+	defs, ok := result[Defs].(SchemaDict)
+	must.True(ok, "canonical schema must carry root $defs")
+	must.Len(defs, 1)
+
+	// Both sites carry their own description, so the shared definition must not
+	// bring the target's along: the constraints are shared, the wording is not.
+	const expectedName = hoistedRefPrefix + "properties_current_step"
+	must.Equal(SchemaDict{
+		"type":      "string",
+		"minLength": float64(1),
+	}, defs[expectedName])
+
+	props := result[Properties].(SchemaDict)
+	must.Equal("User-facing executive summary.",
+		props["final_summary"].(SchemaDict)[Description])
+	must.Equal("4-6 word, past-tense, final summary.",
+		props["completed_subtitle"].(SchemaDict)[Description])
+	for _, field := range []string{"final_summary", "completed_subtitle"} {
+		must.Equal("#/"+Defs+"/"+expectedName, props[field].(SchemaDict)[Ref], "field %s", field)
+	}
+
+	// The pointer target itself is left in place, description included.
+	must.Equal(SchemaDict{
+		"type":        "string",
+		"minLength":   float64(1),
+		"description": "Major step or phase you are on.",
+	}, props["current_step"])
+}
+
+func TestHoistLocalRefsLeavesOnlyDefsReferencesInOutput(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, toolCallSchemaWithPropertyRefs)
+
+	var walk func(node any)
+	walk = func(node any) {
+		switch n := node.(type) {
+		case SchemaDict:
+			if ref, ok := n[Ref].(string); ok {
+				must.False(isHoistableRef(ref), "canonical output must not keep %q", ref)
+			}
+			for _, value := range n {
+				walk(value)
+			}
+		case SchemaList:
+			for _, item := range n {
+				walk(item)
+			}
+		}
+	}
+	walk(result)
+}
+
+func TestHoistLocalRefsKeepsTargetAnnotationWhenSiteHasNone(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, `{
+		"type": "object",
+		"properties": {
+			"a": {"type": "string", "description": "the shared wording"},
+			"b": {"$ref": "#/properties/a"}
+		}
+	}`)
+
+	defs := result[Defs].(SchemaDict)
+	must.Equal(SchemaDict{
+		"type":        "string",
+		"description": "the shared wording",
+	}, defs[hoistedRefPrefix+"properties_a"])
+}
+
+func TestHoistLocalRefsSplitsDefinitionPerAnnotationVariant(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, `{
+		"type": "object",
+		"properties": {
+			"a": {"type": "string", "description": "the shared wording"},
+			"b": {"$ref": "#/properties/a"},
+			"c": {"$ref": "#/properties/a", "description": "its own wording"}
+		}
+	}`)
+
+	defs := result[Defs].(SchemaDict)
+	must.Len(defs, 2, "a shadowing site cannot reuse the annotated definition")
+
+	props := result[Properties].(SchemaDict)
+	bRef := props["b"].(SchemaDict)[Ref].(string)
+	cRef := props["c"].(SchemaDict)[Ref].(string)
+	must.NotEqual(bRef, cRef)
+	must.Contains(defs[defNameOf(bRef)], Description)
+	must.NotContains(defs[defNameOf(cRef)], Description)
+	must.Equal("its own wording", props["c"].(SchemaDict)[Description])
+}
+
+func TestHoistLocalRefsRewritesPointersNestedInAnyOf(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, `{
+		"type": "object",
+		"properties": {
+			"a": {"type": "string"},
+			"b": {"anyOf": [{"type": "null"}, {"$ref": "#/properties/a"}]},
+			"c": {"type": "array", "items": {"$ref": "#/properties/a"}}
+		}
+	}`)
+
+	// One pointer reached from two different keyword contexts still yields one
+	// definition, because the walk is shape driven rather than keyword driven.
+	defs := result[Defs].(SchemaDict)
+	must.Len(defs, 1)
+
+	const expectedName = "#/" + Defs + "/" + hoistedRefPrefix + "properties_a"
+	props := result[Properties].(SchemaDict)
+	branch := props["b"].(SchemaDict)[AnyOf].(SchemaList)[1].(SchemaDict)
+	must.Equal(expectedName, branch[Ref])
+	must.Equal(expectedName, props["c"].(SchemaDict)[Items].(SchemaDict)[Ref])
+}
+
+func TestHoistLocalRefsTerminatesOnSelfReferencingPointer(t *testing.T) {
+	must := require.New(t)
+
+	// properties/node reaches itself through the pointer, so the hoisted copy
+	// must end up referencing its own definition instead of looping forever.
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"properties": {
+			"node": {
+				"type": "object",
+				"properties": {"next": {"anyOf": [{"type": "null"}, {"$ref": "#/properties/node"}]}}
+			}
+		}
+	}`)
+	must.NoError(err)
+
+	hoisted := hoistLocalRefs(schema)
+
+	defs := hoisted[Defs].(SchemaDict)
+	must.Len(defs, 1)
+	const expectedName = hoistedRefPrefix + "properties_node"
+	def := defs[expectedName].(SchemaDict)
+	branch := def[Properties].(SchemaDict)["next"].(SchemaDict)[AnyOf].(SchemaList)[1].(SchemaDict)
+	must.Equal("#/"+Defs+"/"+expectedName, branch[Ref], "the definition must reference itself")
+
+	// The recursion is now expressed through $defs, which the existing
+	// termination check accepts because the anyOf gives it a way out.
+	must.NoError(Schema(hoisted).Validate(WithValidateLevel(ValidateLevelUltra)))
+}
+
+func TestHoistLocalRefsRunsBeforeTheSimplifyLoop(t *testing.T) {
+	must := require.New(t)
+
+	// The pointer target itself needs repair, so hoisting copies the problem into
+	// $defs and the simplify loop then has to reach both places.
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"properties": {
+			"a": {"type": "string", "minLength": -1},
+			"b": {"$ref": "#/properties/a"}
+		}
+	}`)
+	must.NoError(err)
+
+	out, rawErr := Schema(schema).Canonical()
+	must.Error(rawErr, "the original problem must still be reported")
+
+	var result SchemaDict
+	must.NoError(json.Unmarshal([]byte(out), &result))
+
+	// Hoisting ran first, and the repair reached the hoisted copy as well as the
+	// original location, so the two cannot drift apart.
+	repaired := SchemaDict{"type": "string", "minLength": float64(0)}
+	must.Equal(repaired, result[Defs].(SchemaDict)[hoistedRefPrefix+"properties_a"])
+	must.Equal(repaired, result[Properties].(SchemaDict)["a"])
+	must.NoError(Schema(result).Validate(WithValidateLevel(ValidateLevelUltra)))
+}
+
+func TestHoistLocalRefsDoesNotMutateInput(t *testing.T) {
+	must := require.New(t)
+
+	schema, err := ParseSchema(toolCallSchemaWithPropertyRefs)
+	must.NoError(err)
+	before, err := json.Marshal(schema)
+	must.NoError(err)
+
+	hoisted := hoistLocalRefs(schema)
+
+	after, err := json.Marshal(schema)
+	must.NoError(err)
+	must.JSONEq(string(before), string(after), "input schema must not be mutated")
+	must.Contains(hoisted, Defs)
+}
+
+func TestHoistLocalRefsLeavesDefsAndRootPointersAlone(t *testing.T) {
+	must := require.New(t)
+
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"$defs": {"S": {"type": "string"}},
+		"properties": {
+			"a": {"$ref": "#/$defs/S"},
+			"b": {"$ref": "#/$defs/S"},
+			"c": {"properties": {"self": {"$ref": "#"}}, "type": "object"}
+		}
+	}`)
+	must.NoError(err)
+
+	hoisted := hoistLocalRefs(schema)
+
+	defs := hoisted[Defs].(SchemaDict)
+	must.Len(defs, 1, "nothing should be hoisted when every pointer targets $defs or the root")
+	must.Contains(defs, "S")
+}
+
+func TestHoistLocalRefsResolvesPointerIntoItems(t *testing.T) {
+	must := require.New(t)
+	result := canonicalOf(t, `{
+		"type": "object",
+		"properties": {
+			"list": {"type": "array", "items": {"type": "string", "maxLength": 8}},
+			"one": {"$ref": "#/properties/list/items"}
+		}
+	}`)
+
+	defs := result[Defs].(SchemaDict)
+	const expectedName = hoistedRefPrefix + "properties_list_items"
+	must.Equal(SchemaDict{"type": "string", "maxLength": float64(8)}, defs[expectedName])
+
+	props := result[Properties].(SchemaDict)
+	must.Equal("#/"+Defs+"/"+expectedName, props["one"].(SchemaDict)[Ref])
+}
+
+func TestHoistLocalRefsAvoidsCollidingWithExistingDefName(t *testing.T) {
+	must := require.New(t)
+
+	const taken = hoistedRefPrefix + "properties_a"
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"$defs": {"` + taken + `": {"type": "boolean"}},
+		"properties": {
+			"a": {"type": "string"},
+			"b": {"$ref": "#/properties/a"},
+			"c": {"$ref": "#/$defs/` + taken + `"}
+		}
+	}`)
+	must.NoError(err)
+
+	hoisted := hoistLocalRefs(schema)
+
+	defs := hoisted[Defs].(SchemaDict)
+	must.Equal(SchemaDict{"type": "boolean"}, defs[taken], "pre-existing definition must be preserved")
+	must.Equal(SchemaDict{"type": "string"}, defs[taken+"_2"])
+
+	props := hoisted[Properties].(SchemaDict)
+	must.Equal("#/"+Defs+"/"+taken+"_2", props["b"].(SchemaDict)[Ref])
+	must.Equal("#/"+Defs+"/"+taken, props["c"].(SchemaDict)[Ref])
+}
+
+func TestHoistLocalRefsDisambiguatesPointersThatSanitizeToSameName(t *testing.T) {
+	must := require.New(t)
+
+	// Both pointers sanitize to __ref_properties_a_properties_b after '/' → '_'.
+	schema, err := ParseSchema(`{
+		"type": "object",
+		"properties": {
+			"a": {"type": "object", "properties": {"b": {"type": "string"}}},
+			"a_properties_b": {"type": "integer"},
+			"from_nested": {"$ref": "#/properties/a/properties/b"},
+			"from_flat": {"$ref": "#/properties/a_properties_b"}
+		}
+	}`)
+	must.NoError(err)
+
+	hoisted := hoistLocalRefs(schema)
+
+	defs := hoisted[Defs].(SchemaDict)
+	must.Len(defs, 2)
+
+	const base = hoistedRefPrefix + "properties_a_properties_b"
+	must.Contains(defs, base)
+	must.Contains(defs, base+"_2")
+
+	props := hoisted[Properties].(SchemaDict)
+	nestedRef := props["from_nested"].(SchemaDict)[Ref].(string)
+	flatRef := props["from_flat"].(SchemaDict)[Ref].(string)
+	must.NotEqual(nestedRef, flatRef)
+	must.Equal(SchemaDict{"type": "string"}, defs[defNameOf(nestedRef)])
+	must.Equal(SchemaDict{"type": "integer"}, defs[defNameOf(flatRef)])
+}
+
+func TestHoistLocalRefsKeepsUnresolvablePointerForValidator(t *testing.T) {
+	must := require.New(t)
+
+	for name, raw := range map[string]string{
+		"missing target": `{"type":"object","properties":{"b":{"$ref":"#/properties/nope"}}}`,
+		"not a subschema": `{"type":"object","properties":{
+			"a":{"type":"string"},"b":{"$ref":"#/properties/a/type"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema, err := ParseSchema(raw)
+			must.NoError(err)
+
+			hoisted := hoistLocalRefs(schema)
+			must.NotContains(hoisted, Defs, "unresolvable pointer must not create a definition")
+
+			// The existing validator rules still reject it.
+			must.Error(schema.Validate(WithValidateLevel(ValidateLevelUltra)))
+		})
+	}
 }
