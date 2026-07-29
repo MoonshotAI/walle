@@ -17,3 +17,7 @@
 {"properties":{"child":{"$ref":"#"},"name":{"type":"string"}},"required":["name"],"type":"object"}
 {"properties":{"optional_prop":{"properties":{"self_ref":{"$ref":"#"}},"type":"object"},"required_prop":{"type":"string"}},"required":["required_prop"],"type":"object"}
 {"required":[],"type":"object"}
+{"properties":{"a":{"type":"string"},"b":{"$ref":"#/properties/a"}},"type":"object"}
+{"properties":{"current_step":{"description":"step","minLength":1,"type":"string"},"final_summary":{"$ref":"#/properties/current_step","description":"summary"}},"type":"object"}
+{"properties":{"list":{"items":{"type":"string"},"type":"array"},"one":{"$ref":"#/properties/list/items"}},"type":"object"}
+{"$defs":{"S":{"type":"string"}},"properties":{"a":{"$ref":"#/$defs/S"},"b":{"type":"integer"},"c":{"$ref":"#/properties/b"}},"type":"object"}

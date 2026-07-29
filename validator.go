@@ -574,7 +574,7 @@ func (v *schemaValidator) Validate(schema any) error {
 }
 
 func (v *schemaValidator) CanonicalWithMaxAttempts(schema Schema, maxAttempts int) (string, error) {
-	currentSchema := schema
+	currentSchema := Schema(hoistLocalRefs(schema))
 
 	var rawErr error
 	for i := 0; i < maxAttempts; i++ {
@@ -610,6 +610,10 @@ func (v *schemaValidator) validateSchemaDict(schema SchemaDict) error {
 	if len(schema) == 0 {
 		return nil
 	}
+
+	// Callers such as chatapis Validate without Canonical. Hoist first so that
+	// "#/properties/..." is not rejected here by ValidateRef.
+	schema = hoistLocalRefs(schema)
 
 	v.context.SchemaRoot = schema
 
