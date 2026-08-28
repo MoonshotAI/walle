@@ -17,24 +17,24 @@
 
 | Categories/错误分类 | rules | details |
 | --- | --- | --- |
-| Structural Errors/结构错误 | subschema需要显示指定type字段， 如果是anyOf/$ref 那么type必须定义在anyOf/$ref内部，不能在anyOf/$ref同级目录 | 两种例外:<br>情况1：完整schema == {} 代表ANY<br>情况2："additionalProperties" : {} 代表ANY<br>注意：非上面两种情况暂时不支持 {} 自动推导为ANY，比如<br><br><pre><code class="language-json">"properties": {&#10;  "key1": {},&#10;  "key2": {}&#10;}</code></pre> |
+| Structural Errors/结构错误 | subschema需要显式指定type字段。与 anyOf 或 $ref 同级时 type 合法（2020-12 下同级关键字按 AND 生效），lite 放行：与 anyOf 同级时 Canonical 把 type 分发进每个分支，与 $ref 同级时折叠进被引用的 schema。与被引用 schema 的 type 交集为空时属恒假，lite 仍放行但 Canonical 把该子 schema 退化为 {}，strict 及以上拒绝 | 两种例外:<br>情况1：完整schema == {} 代表ANY<br>情况2："additionalProperties" : {} 代表ANY<br>注意：非上面两种情况暂时不支持 {} 自动推导为ANY，比如<br><br><pre><code class="language-json">"properties": {&#10;  "key1": {},&#10;  "key2": {}&#10;}</code></pre> |
 |  | 只支持null/boolean/object/array/number/integer/string 这7种types, root schema必须是dict |  |
 |  | 只支持MFJS约定的范围的keywords | 分为两种情况：非法的keyword、合法但是MFJS不支持的keyword |
 |  | 各种keywords的位置要符合json schema规范 | object类型中只允许type/properties/required/additionalProperties/anyOf/$ref 这些keywords |
 |  | Object: required 列举的字段必须是 properties 中声明过的 |  |
 |  | Object: properties中的keys不能重复 |  |
-|  | Object: Objects have limitations on nesting depth and size | schema may have up to 100 object properties total, with up to 5 levels of nesting. |
+|  | Object: Objects have limitations on nesting depth and size | 默认上限：所有 object 累计 3000 个 properties 键、嵌套 30 层、整份 schema 120000 字节。调用方可用 WithMaxTotalPropertiesKeysNum / WithMaxSchemaDepth / WithMaxSchemaSize 调整 |
 |  | Object: properties的key的名字不能是"$defs"/"$ref"/"anyOf"/"required"/"additionalProperties" |  |
-|  | type keyword不能与 anyOf/$ref 存在于同级目录，type应该位于anyOf/$ref的内部 |  |
-|  | anyOf 元素个数>=1, <= 10 |  |
+|  | type keyword 与 anyOf 或 $ref 同级都合法，lite 放行；ultra 报出来，由 Canonical 分发进 anyOf 各分支、或折叠进被引用的 schema | 分级行为详见 [validation-principles.zh.md](./validation-principles.zh.md) |
+|  | anyOf 元素个数>=1, <= 500（默认，可用 WithMaxAnyOfItems 调整） |  |
 |  | $defs/$id 只能定义在root level |  |
 |  | $ref 需要指向本schema自身或者本schema的subschema 的合法$defs，不支持remote/跨文件/url | 指向自身: "$ref": "#" |
-|  | $ref/$defs 需要有合理终止条件，禁止infinite recursive loop |  |
+|  | $ref/$defs 需要有合理终止条件，禁止infinite recursive loop | 判据是能否构造有限实例：可选属性成环、数组成环且未设 minItems 都可终止；必填属性成环、minItems >= 1 的数组成环则拒绝 |
 |  | $ref的位置要合法 | 可以存在于："properties", "defs", "additionalProperties", "anyOf", "items", "root" 相关位置处 |
-|  | Array: Limitations on enum size | schema may have up to 500 enum values across all enum properties. For a single/number/integer enum property with string values, the total string length(number/integer->string) of all enum values cannot exceed 7,500 characters when there are more than 250 enum values. |
+|  | Array: Limitations on enum size | 单个 enum 默认最多 1000 项。另有一条字符串总长限制（上限 75000 字符），但它只在 enum 项数超过 2500 时才检查——该阈值高于 1000 的项数上限，因此默认配置下不会触发，只有调用方用 WithMaxEnumItems 放宽项数后才生效 |
 |  | Array:  "items"可以不定义，如果定义则内容不能为空 |  |
-|  | Limitations on total string size | schema may have up to 500 enum values across all enum properties. For a single enum property with string values, the total string length of all enum values cannot exceed 7,500 characters when there are more than 250 enum values.是基于go 标准库json.Marshal统计，因此空白字符不被计入字符串大小 |
-|  | anyOf/$ref同级目录下只能有$description/$title关键字，如果是root则可以有"$defs"/"$id"关键字 | 强限制，避免展开之后的各种复杂类型/关键字不匹配情况出现 |
+|  | Limitations on total string size | 同上：enum 项数默认上限 1000，字符串总长上限 75000 字符、触发阈值 2500 项。长度基于 go 标准库 json.Marshal 统计，因此空白字符不被计入字符串大小 |
+|  | anyOf 与 $ref 同级都允许约束关键字，root 额外允许"$defs"/"$id" | 按 2020-12 的 AND 语义合法：lite 放行。ultra 报出来，由 Canonical 把 anyOf 同级的约束分发进每个分支、把 $ref 同级的内联展开，同名关键字都取更严的一侧 |
 |  | default关键字只支持boolean/number/string/integer/null这些类型，默认值需要与类型匹配 |  |
 | Data Type Errors/类型错误 | type和enum value类型不匹配，如integer vs 3.67 |  |
 |  | type的value类型必须是字符串 |  |
@@ -47,5 +47,5 @@
 |  | description/title/$id 类型必须是字符串 |  |
 |  | anyOf 类型必须是数组，每个items必须是合法的subSchema |  |
 |  | additionalPropertis value的类型只能是boolean或者object | 如果不指定，默认值是true |
-|  | 各类型存在的min/max需要满足 min <= max 的限制条件 | "type": "integer"，但是mininum/maxinum的数值是浮点，walle validation level 为Normal时schema视为合法，但enforcer会进行Rounding，算法选择Rounding toward to zero (Truncate) |
+|  | 各类型存在的min/max需要满足 min <= max 的限制条件 | min > max 属恒假：lite 放行但 Canonical 把该子 schema 退化为 {}，strict 及以上拒绝。另："type": "integer" 而 mininum/maxinum 为浮点时 schema 视为合法，但 enforcer 会进行 Rounding，算法选择 Rounding toward to zero (Truncate) |
 |  | $defs 的key name不能包括 / 字符 |  |

@@ -11,7 +11,6 @@
 {"schema":"{\"type\": [123, \"string\"]}","expect":"invalid type","unmarshal":false}
 {"schema":"\"\"","expect":"JSON schema parsing error","unmarshal":true}
 {"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": \"not an object\"\n\t\t\t}","expect":"properties must be an object","unmarshal":false}
-{"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"\": {\"type\": \"string\"}\n\t\t\t\t}\n\t\t\t}","expect":"property name cannot be empty","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": {\n\t\t\t\t\t\"user\": {\n\t\t\t\t\t\t\"type\": \"object\",\n\t\t\t\t\t\t\"properties\": {\n\t\t\t\t\t\t\ttrue: {\"type\": \"string\"}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}","expect":"JSON schema parsing error","unmarshal":true}
 {"schema":"{\n\t\t\t\t\"anyOf\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"type\": \"object\",\n\t\t\t\t\t\t\"properties\": {\n\t\t\t\t\t\t\t3.14: {\"type\": \"string\"}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}","expect":"JSON schema parsing error","unmarshal":true}
 {"schema":"{\n\t\t\t\t\"$defs\": {\n\t\t\t\t\t\"User\": {\n\t\t\t\t\t\t\"type\": \"object\",\n\t\t\t\t\t\t\"properties\": {\n\t\t\t\t\t\t\tnull: {\"type\": \"string\"}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}","expect":"JSON schema parsing error","unmarshal":true}

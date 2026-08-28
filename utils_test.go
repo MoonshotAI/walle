@@ -399,14 +399,15 @@ func TestTraverseAndCheckRefs(t *testing.T) {
 		must.Contains(strings.ToLower(err.Error()), "detected infinite recursion")
 
 		if validator.config.IsUltra() || validator.config.IsTest() {
-			// Test reference with conflicting keywords
+			// number alongside a reference to a string: the two types have no common
+			// instance, so this is unsatisfiable rather than a mergeable duplicate
 			schema = SchemaDict{
 				"$ref": "#/$defs/simpleType",
 				"type": "number",
 			}
 			err = validator.TraverseAndCheckRefs(schema, true, nil, newSchemaPath("properties.conflicting"))
 			must.Error(err)
-			must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
+			must.Contains(strings.ToLower(err.Error()), "intersection is empty")
 		}
 
 		// Test traversal of complex nested structure
@@ -537,13 +538,26 @@ func TestCheckRefContext(t *testing.T) {
 		must.NoError(err)
 
 		if validator.config.IsUltra() || validator.config.IsTest() {
-			// Test with direct keyword conflict
+			// Contradictory types cannot be merged at all
 			parent = SchemaDict{
 				"$ref": "#/$defs/type",
-				"type": "number", // Conflicts with refSchema
+				"type": "number", // no instance is both a number and a string
 			}
 			refSchema = SchemaDict{
 				"type": "string",
+			}
+			err = validator.CheckRefContext(parent, refSchema, newSchemaPath(""))
+			must.Error(err)
+			must.Contains(strings.ToLower(err.Error()), "intersection is empty")
+
+			// A duplicate that could be merged is reported as a keyword conflict
+			parent = SchemaDict{
+				"$ref":      "#/$defs/type",
+				"minLength": 20.0,
+			}
+			refSchema = SchemaDict{
+				"type":      "string",
+				"minLength": 10.0,
 			}
 			err = validator.CheckRefContext(parent, refSchema, newSchemaPath(""))
 			must.Error(err)
@@ -618,25 +632,37 @@ func TestRefCommonKeywordConflictByValidateLevel(t *testing.T) {
 		must.Contains(strings.ToLower(err.Error()), "description")
 	})
 
-	t.Run("lite still rejects structural keyword conflicts after ref expansion", func(t *testing.T) {
-		must := require.New(t)
-		schema := `{
-			"type": "object",
-			"properties": {
-				"value": {
-					"$ref": "#/$defs/ValueType",
-					"type": "string"
-				}
-			},
-			"$defs": {
-				"ValueType": { "type": "number" }
+	// A contradiction inside one node is reported from strict upwards, the same way
+	// a lower bound above its upper bound is. Lite accepts the schema and leaves it
+	// to canonicalisation to drop the contradicting keyword.
+	unsatisfiableTypeBesideRef := `{
+		"type": "object",
+		"properties": {
+			"value": {
+				"$ref": "#/$defs/ValueType",
+				"type": "string"
 			}
-		}`
+		},
+		"$defs": {
+			"ValueType": { "type": "number" }
+		}
+	}`
+
+	t.Run("lite allows an unsatisfiable type beside $ref", func(t *testing.T) {
+		must := require.New(t)
 		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
-		err := validator.Validate(schema)
-		must.Error(err)
-		must.Contains(strings.ToLower(err.Error()), "type")
+		must.NoError(validator.Validate(unsatisfiableTypeBesideRef))
 	})
+
+	for _, level := range []ValidateLevel{ValidateLevelStrict, ValidateLevelUltra} {
+		t.Run(string(level)+" rejects an unsatisfiable type beside $ref", func(t *testing.T) {
+			must := require.New(t)
+			validator := newSchemaValidator(WithValidateLevel(level))
+			err := validator.Validate(unsatisfiableTypeBesideRef)
+			must.Error(err)
+			must.Contains(strings.ToLower(err.Error()), "intersection is empty")
+		})
+	}
 
 	schemaWithAnyOfParentDescriptionConflict := `{
 		"type": "object",
@@ -771,12 +797,20 @@ func TestRefCommonKeywordConflictByValidateLevel(t *testing.T) {
 		}
 	}`
 
-	t.Run("lite still rejects structural keyword conflict in anyOf with parent", func(t *testing.T) {
+	// Constraining an instance both directly and inside a branch is a legal
+	// conjunction, so lite accepts it and leaves canonicalisation to push the outer
+	// copy into the branches.
+	t.Run("lite allows a structural keyword stated both beside and inside anyOf", func(t *testing.T) {
 		must := require.New(t)
 		validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+		must.NoError(validator.Validate(schemaWithAnyOfParentMinLengthConflict))
+	})
+
+	t.Run("ultra reports it so that Canonical distributes it", func(t *testing.T) {
+		must := require.New(t)
+		validator := newSchemaValidator(WithValidateLevel(ValidateLevelUltra))
 		err := validator.Validate(schemaWithAnyOfParentMinLengthConflict)
 		must.Error(err)
-		must.Contains(strings.ToLower(err.Error()), "conflicting keywords")
 		must.Contains(strings.ToLower(err.Error()), "minlength")
 	})
 

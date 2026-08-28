@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,6 +85,86 @@ func (p schemaPath) StringWithoutLast() schemaPath {
 		return schemaPath{Parts: []string{Root}}
 	}
 	return newSchemaPathFromParts(p.Parts[:len(p.Parts)-1])
+}
+
+// typeSet turns a type keyword value into a set of type names. Returns nil when
+// the value is missing or is not a usable type declaration.
+func typeSet(value any) map[string]struct{} {
+	switch t := value.(type) {
+	case string:
+		return map[string]struct{}{t: {}}
+	case SchemaList:
+		set := make(map[string]struct{}, len(t))
+		for _, item := range t {
+			if name, ok := item.(string); ok {
+				set[name] = struct{}{}
+			}
+		}
+		if len(set) == 0 {
+			return nil
+		}
+		return set
+	}
+	return nil
+}
+
+// typeSetsDisjoint reports whether no instance can satisfy both type sets at
+// once. integer and number are not disjoint: every integer is also a number, so
+// their intersection is integer. Unknown or absent sets are treated as
+// "no constraint" and therefore never disjoint.
+func typeSetsDisjoint(a, b map[string]struct{}) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	for name := range a {
+		if _, ok := b[name]; ok {
+			return false
+		}
+		switch name {
+		case Integer:
+			if _, ok := b[Number]; ok {
+				return false
+			}
+		case Number:
+			if _, ok := b[Integer]; ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// enumValuesDisjoint reports whether two enum lists have no value in common.
+// Absent or empty lists impose no constraint and are never disjoint.
+func enumValuesDisjoint(a, b any) bool {
+	listA, okA := a.(SchemaList)
+	listB, okB := b.(SchemaList)
+	if !okA || !okB || len(listA) == 0 || len(listB) == 0 {
+		return false
+	}
+
+	for _, left := range listA {
+		for _, right := range listB {
+			if reflect.DeepEqual(left, right) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// unsatisfiableOverlap names a keyword that the two schemas both constrain in
+// ways that cannot hold at once, or "" when every shared keyword still admits
+// some instance. Numeric bounds are absent on purpose: conjoining two minLength
+// values just keeps the larger one, which is always satisfiable.
+func unsatisfiableOverlap(parent, refSchema SchemaDict) string {
+	if typeSetsDisjoint(typeSet(parent[Type]), typeSet(refSchema[Type])) {
+		return Type
+	}
+	if enumValuesDisjoint(parent[Enum], refSchema[Enum]) {
+		return Enum
+	}
+	return ""
 }
 
 // validateUtils provides utility functions for schema validation

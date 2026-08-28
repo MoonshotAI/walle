@@ -733,3 +733,530 @@ func TestLiteAllowsReservedPropertyNamesInProperties(t *testing.T) {
 	must.Error(err, "ultra should reject reserved property names")
 	must.Contains(strings.ToLower(err.Error()), "reserved")
 }
+
+// Termination is about whether a *finite* instance exists, not about whether the
+// schema mentions itself. A cycle only makes the schema unsatisfiable when every
+// hop is mandatory: a required object property always forces one more level,
+// while an array without a positive minItems can stop at the empty array.
+//
+// This used to be masked twice over: PostValidateRefs skipped the whole check
+// whenever the root happened to terminate, and CheckRefTermination treated the
+// required properties of an object as "any one of them terminates" instead of
+// "all of them must".
+func TestRefTerminationDistinguishesFiniteFromInfiniteRecursion(t *testing.T) {
+	cases := []struct {
+		name string
+		// witness is a JSON instance proving satisfiability, or why none exists
+		witness string
+		schema  string
+		reject  bool
+	}{
+		{
+			name:    "optional self reference stops immediately",
+			witness: `{"node":{}}`,
+			schema:  `{"type":"object","properties":{"node":{"$ref":"#/$defs/N"}},"$defs":{"N":{"type":"object","properties":{"next":{"$ref":"#/$defs/N"}}}}}`,
+		},
+		{
+			name:    "required array self reference stops at the empty array",
+			witness: `{"children":[]}`,
+			schema:  `{"type":"object","properties":{"children":{"type":"array","items":{"$ref":"#"}}},"required":["children"]}`,
+		},
+		{
+			name:    "mutual recursion through an unbounded array stops at the empty array",
+			witness: `{"root":{"level2":[]}}`,
+			schema:  `{"type":"object","properties":{"root":{"$ref":"#/$defs/L1"}},"required":["root"],"$defs":{"L1":{"type":"object","properties":{"level2":{"$ref":"#/$defs/L2"}},"required":["level2"]},"L2":{"type":"array","items":{"$ref":"#/$defs/L1"}}}}`,
+		},
+		{
+			name:    "required self reference never bottoms out",
+			witness: "none: every instance needs one more 'next'",
+			schema:  `{"type":"object","properties":{"node":{"$ref":"#/$defs/N"}},"$defs":{"N":{"type":"object","properties":{"next":{"$ref":"#/$defs/N"}},"required":["next"]}}}`,
+			reject:  true,
+		},
+		{
+			name:    "mutual recursion where every hop is required",
+			witness: "none: A needs B, B needs A",
+			schema:  `{"type":"object","properties":{"root":{"$ref":"#/$defs/A"}},"required":["root"],"$defs":{"A":{"type":"object","properties":{"b":{"$ref":"#/$defs/B"}},"required":["b"]},"B":{"type":"object","properties":{"a":{"$ref":"#/$defs/A"}},"required":["a"]}}}`,
+			reject:  true,
+		},
+		{
+			name:    "minItems forces the array cycle to continue",
+			witness: "none: the array can never be empty",
+			schema:  `{"type":"object","properties":{"root":{"$ref":"#/$defs/L1"}},"required":["root"],"$defs":{"L1":{"type":"object","properties":{"level2":{"$ref":"#/$defs/L2"}},"required":["level2"]},"L2":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/L1"}}}}`,
+			reject:  true,
+		},
+		{
+			name:    "non-terminating branch hidden behind a terminating sibling",
+			witness: "none: 'loop' is required alongside the harmless 'label'",
+			schema:  `{"type":"object","properties":{"label":{"type":"string"},"loop":{"$ref":"#/$defs/N"}},"required":["label","loop"],"$defs":{"N":{"type":"object","properties":{"next":{"$ref":"#/$defs/N"}},"required":["next"]}}}`,
+			reject:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := newSchemaValidator(WithValidateLevel(ValidateLevelLite)).Validate(tc.schema)
+			if tc.reject {
+				if err == nil {
+					t.Fatalf("expected rejection (%s)", tc.witness)
+				}
+				if !strings.Contains(err.Error(), "infinite recursion") {
+					t.Fatalf("expected an infinite recursion error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected schema to pass, %s is a valid instance: %v", tc.witness, err)
+			}
+		})
+	}
+}
+
+// A lower bound above its upper bound cannot be satisfied by any instance. lite
+// keeps accepting such schemas so that existing callers do not start failing,
+// but strict and above reject them, and Canonical degrades the offending
+// subschema to {} rather than deleting the bounds -- deleting them would turn
+// "impossible" into "anything goes".
+func TestBoundConflictsRejectedFromStrictUpwards(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema string
+	}{
+		{
+			name:   "minLength above maxLength",
+			schema: `{"type":"object","properties":{"a":{"type":"string","minLength":10,"maxLength":2}}}`,
+		},
+		{
+			name:   "minimum above maximum",
+			schema: `{"type":"object","properties":{"a":{"type":"integer","minimum":10,"maximum":2}}}`,
+		},
+		{
+			name:   "minItems above maxItems",
+			schema: `{"type":"object","properties":{"a":{"type":"array","minItems":10,"maxItems":2,"items":{"type":"string"}}}}`,
+		},
+	}
+
+	accepting := []ValidateLevel{ValidateLevelLoose, ValidateLevelLite}
+	rejecting := []ValidateLevel{ValidateLevelStrict, ValidateLevelUltra}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, level := range accepting {
+				if err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.schema); err != nil {
+					t.Errorf("%s should still accept the schema, got %v", level, err)
+				}
+			}
+			for _, level := range rejecting {
+				err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.schema)
+				if err == nil {
+					t.Errorf("%s should reject the schema", level)
+					continue
+				}
+				if !strings.Contains(err.Error(), "cannot be greater than") {
+					t.Errorf("%s: expected a bound conflict error, got %v", level, err)
+				}
+			}
+
+			schema, err := ParseSchema(tc.schema)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			result, _ := schema.Canonical()
+			if !strings.Contains(result, `"a":{}`) {
+				t.Errorf("expected the property to degrade to {}, got %s", result)
+			}
+		})
+	}
+}
+
+// Bounds that make sense together must survive untouched at every level.
+func TestConsistentBoundsAreUntouched(t *testing.T) {
+	const schema = `{"type":"object","properties":{"a":{"type":"string","minLength":2,"maxLength":10}}}`
+
+	for _, level := range []ValidateLevel{ValidateLevelLoose, ValidateLevelLite, ValidateLevelStrict, ValidateLevelUltra} {
+		if err := newSchemaValidator(WithValidateLevel(level)).Validate(schema); err != nil {
+			t.Errorf("%s should accept consistent bounds, got %v", level, err)
+		}
+	}
+
+	parsed, err := ParseSchema(schema)
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	result, warnErr := parsed.Canonical()
+	if warnErr != nil {
+		t.Fatalf("expected no warning, got %v", warnErr)
+	}
+	for _, frag := range []string{`"minLength":2`, `"maxLength":10`} {
+		if !strings.Contains(result, frag) {
+			t.Errorf("expected %s to survive, got %s", frag, result)
+		}
+	}
+}
+
+// The node that started all of this, taken from automation_update.parameters.json.
+// The use site restates the definition's type and minLength, adds a description
+// and an unsupported format, and points at the definition with $ref. lite used
+// to answer 400 because a keyword appeared on both sides at all.
+func TestReportedRefSiblingSchemaIsAccepted(t *testing.T) {
+	const schema = `{
+		"type": "object",
+		"properties": {
+			"__schema20": {
+				"type": "string",
+				"minLength": 1,
+				"format": "uuid",
+				"description": "Target thread UUID for heartbeat automations. Prefer destination=thread for the current local thread instead of inventing or copying raw thread ids.",
+				"$ref": "#/$defs/__schema2"
+			}
+		},
+		"$defs": {
+			"__schema2": { "type": "string", "minLength": 1 }
+		}
+	}`
+
+	for _, level := range []ValidateLevel{ValidateLevelLoose, ValidateLevelLite, ValidateLevelStrict} {
+		if err := newSchemaValidator(WithValidateLevel(level)).Validate(schema); err != nil {
+			t.Errorf("%s must accept the reported node, got %v", level, err)
+		}
+	}
+
+	if err := newSchemaValidator(WithValidateLevel(ValidateLevelUltra)).Validate(schema); err == nil {
+		t.Fatal("ultra must still report the unsupported format")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "unsupported keywords") {
+		t.Fatalf("expected an unsupported-keyword error, got %v", err)
+	}
+
+	parsed, err := ParseSchema(schema)
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	result, warnErr := parsed.Canonical()
+	if warnErr == nil || !strings.Contains(strings.ToLower(warnErr.Error()), "format") {
+		t.Fatalf("expected a warning about format, got %v", warnErr)
+	}
+
+	for _, want := range []string{
+		`"type":"string"`,
+		`"minLength":1`,
+		`"description":"Target thread UUID for heartbeat automations. Prefer destination=thread for the current local thread instead of inventing or copying raw thread ids."`,
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %s to survive, got %s", want, result)
+		}
+	}
+	if strings.Contains(result, `"format"`) {
+		t.Errorf("format is unsupported and must be dropped, got %s", result)
+	}
+}
+
+// Constraining an instance both directly and through anyOf is a legal conjunction
+// under 2020-12, and so is requiring a property the schema does not describe or
+// listing an enum value the type rules out. None of them can be handed to the
+// enforcer as written, so only the canonicalising levels report them; lite has to
+// accept the schema and leave the rewriting to Canonical.
+func TestLiteAcceptsStructuralShapesCanonicalCanRewrite(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		// want is the complete canonical form, so a rewrite that quietly loosens
+		// the schema cannot slip past
+		want string
+	}{
+		{
+			name: "type beside anyOf is pushed into the branches",
+			in:   `{"type":"object","properties":{"v":{"type":"string","anyOf":[{"minLength":1},{"maxLength":9}]}}}`,
+			want: `{"properties":{"v":{"anyOf":[{"minLength":1,"type":"string"},{"maxLength":9,"type":"string"}]}},"type":"object"}`,
+		},
+		{
+			name: "a branch the parent type rules out is dropped",
+			in:   `{"type":"object","properties":{"v":{"type":"string","anyOf":[{"minLength":1},{"type":"integer"}]}}}`,
+			want: `{"properties":{"v":{"anyOf":[{"minLength":1,"type":"string"}]}},"type":"object"}`,
+		},
+		{
+			name: "every branch ruled out leaves nothing to satisfy",
+			in:   `{"type":"object","properties":{"v":{"type":"string","anyOf":[{"type":"integer"},{"type":"boolean"}]}}}`,
+			want: `{"properties":{"v":{}},"type":"object"}`,
+		},
+		{
+			name: "a contradiction behind a branch's $ref also empties the node",
+			in:   `{"type":"object","properties":{"v":{"type":"string","anyOf":[{"$ref":"#/$defs/S"}]}},"$defs":{"S":{"type":"number"}}}`,
+			want: `{"$defs":{"S":{"type":"number"}},"properties":{"v":{}},"type":"object"}`,
+		},
+		{
+			name: "the stricter of the two bounds survives distribution",
+			in:   `{"type":"object","properties":{"v":{"minLength":20,"anyOf":[{"type":"string","minLength":10}]}}}`,
+			want: `{"properties":{"v":{"anyOf":[{"minLength":20,"type":"string"}]}},"type":"object"}`,
+		},
+		{
+			name: "an annotation beside anyOf stays where it is",
+			in:   `{"type":"object","properties":{"v":{"description":"x","anyOf":[{"type":"string"},{"type":"integer"}]}}}`,
+			want: `{"properties":{"v":{"anyOf":[{"type":"string"},{"type":"integer"}],"description":"x"}},"type":"object"}`,
+		},
+		{
+			name: "an undeclared required entry is pruned and the declared one kept",
+			in:   `{"type":"object","properties":{"a":{"type":"string"}},"required":["a","b"]}`,
+			want: `{"properties":{"a":{"type":"string"}},"required":["a"],"type":"object"}`,
+		},
+		{
+			name: "an empty required entry is pruned and the declared one kept",
+			in:   `{"type":"object","properties":{"a":{"type":"string"}},"required":["a",""]}`,
+			want: `{"properties":{"a":{"type":"string"}},"required":["a"],"type":"object"}`,
+		},
+		{
+			name: "required with nothing left to keep goes away",
+			in:   `{"type":"object","properties":{"a":{"type":"string"}},"required":["b"]}`,
+			want: `{"properties":{"a":{"type":"string"}},"type":"object"}`,
+		},
+		{
+			name: "required without properties asserts nothing the enforcer can use",
+			in:   `{"type":"object","required":["a"]}`,
+			want: `{"type":"object"}`,
+		},
+		{
+			name: "required on a non-object is a no-op and is dropped",
+			in:   `{"type":"string","required":["a"]}`,
+			want: `{"type":"string"}`,
+		},
+		{
+			name: "enum values the type rules out are dropped, the rest kept",
+			in:   `{"type":"object","properties":{"v":{"type":"string","enum":["a",1,"b"]}}}`,
+			want: `{"properties":{"v":{"enum":["a","b"],"type":"string"}},"type":"object"}`,
+		},
+		{
+			// Nothing satisfies the pair, and one of them has to give. The type is
+			// kept because it is the tighter of the two survivors: keeping the enum
+			// instead would accept a boolean the schema ruled out.
+			name: "an enum the type rules out entirely gives way to the type",
+			in:   `{"type":"object","properties":{"v":{"type":["null"],"enum":[false]}}}`,
+			want: `{"properties":{"v":{"type":["null"]}},"type":"object"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, level := range []ValidateLevel{ValidateLevelLoose, ValidateLevelLite, ValidateLevelStrict} {
+				if err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.in); err != nil {
+					t.Errorf("%s must accept the schema, got %v", level, err)
+				}
+			}
+
+			parsed, err := ParseSchema(tc.in)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			got, _ := parsed.Canonical()
+			if got != tc.want {
+				t.Errorf("canonical form\n got %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A path naming an anyOf branch has to be followed into that branch even when it
+// is the only part of the path. Treating it as a keyword on the root instead made
+// every simplification of a root-level branch fail and throw away the whole
+// document.
+func TestSimplifyReachesARootLevelAnyOfBranch(t *testing.T) {
+	const schema = `{"anyOf":[{"$ref":"#/$defs/S","type":"string"}],"$defs":{"S":{"type":"string","maxLength":3}}}`
+
+	parsed, err := ParseSchema(schema)
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+
+	// The branch restates the definition's own type, so dropping it costs nothing.
+	// What matters is that the rest of the document is still there: before the fix
+	// the failed lookup returned an empty schema.
+	got, _ := parsed.Canonical()
+	const want = `{"$defs":{"S":{"maxLength":3,"type":"string"}},"anyOf":[{"$ref":"#/$defs/S"}]}`
+	if got != want {
+		t.Errorf("canonical form\n got %s\nwant %s", got, want)
+	}
+}
+
+// The empty string is a property name like any other: 2020-12 puts no constraint
+// on the keys of properties, and the enforcer generates it, down to {"": ...}.
+// walle used to delete such a property while canonicalising, silently dropping a
+// field the caller had declared.
+func TestEmptyPropertyNameSurvives(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "declared as a property",
+			in:   `{"type":"object","properties":{"":{"type":"string"},"a":{"type":"number"}}}`,
+			want: `{"properties":{"":{"type":"string"},"a":{"type":"number"}},"type":"object"}`,
+		},
+		{
+			name: "declared and required",
+			in:   `{"type":"object","properties":{"":{"type":"string"}},"required":[""],"additionalProperties":false}`,
+			want: `{"additionalProperties":false,"properties":{"":{"type":"string"}},"required":[""],"type":"object"}`,
+		},
+		{
+			// Undeclared is the one thing that is still wrong, and it is wrong for
+			// the same reason any other undeclared name is: only that entry goes.
+			name: "required but never declared",
+			in:   `{"type":"object","properties":{"a":{"type":"number"}},"required":["","a"]}`,
+			want: `{"properties":{"a":{"type":"number"}},"required":["a"],"type":"object"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, level := range []ValidateLevel{ValidateLevelLite, ValidateLevelStrict} {
+				if err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.in); err != nil {
+					t.Errorf("%s must accept the schema, got %v", level, err)
+				}
+			}
+
+			parsed, err := ParseSchema(tc.in)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			got, _ := parsed.Canonical()
+			if got != tc.want {
+				t.Errorf("canonical form\n got %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A path whose only part names an anyOf branch, such as "anyOf{0}", has to be
+// followed into that branch. Resolving it as a keyword on the root instead made
+// every simplification inside a root-level branch fail and empty the whole
+// document, which is the opposite of degrading just the field at fault.
+func TestSimplifyDegradesInsideARootLevelAnyOfBranch(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "an undeclared required entry inside a branch",
+			in:   `{"anyOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a","b"]}]}`,
+			want: `{"anyOf":[{"properties":{"a":{"type":"string"}},"required":["a"],"type":"object"}]}`,
+		},
+		{
+			name: "required inside a branch with nothing left to keep",
+			in:   `{"anyOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["b"]}]}`,
+			want: `{"anyOf":[{"properties":{"a":{"type":"string"}},"type":"object"}]}`,
+		},
+		{
+			name: "an enum value the branch's type rules out",
+			in:   `{"anyOf":[{"type":"string","enum":["a",1]}]}`,
+			want: `{"anyOf":[{"enum":["a"],"type":"string"}]}`,
+		},
+		{
+			name: "an enum the branch's type rules out entirely",
+			in:   `{"anyOf":[{"type":["null"],"enum":[false]}]}`,
+			want: `{"anyOf":[{"type":["null"]}]}`,
+		},
+		{
+			name: "a nested anyOf carrying its own parent constraint",
+			in:   `{"anyOf":[{"type":"string","anyOf":[{"minLength":1},{"maxLength":9}]}]}`,
+			want: `{"anyOf":[{"anyOf":[{"minLength":1,"type":"string"},{"maxLength":9,"type":"string"}]}]}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := ParseSchema(tc.in)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			got, _ := parsed.Canonical()
+			if got != tc.want {
+				t.Errorf("canonical form\n got %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A chain of definitions where every level references the next through two
+// required properties forms a DAG, not a cycle: every definition terminates,
+// so the schema is valid. Walking each sibling's subgraph from scratch costs
+// 2^n walks -- n=30 would take hours; reusing expanded definitions brings it
+// back to milliseconds.
+func TestRefTerminationReusesExpandedDefs(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"type":"object","properties":{"root":{"$ref":"#/$defs/D1"}},"required":["root"],"$defs":{`)
+	const levels = 30
+	for i := 1; i < levels; i++ {
+		if i > 1 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `"D%d":{"type":"object","properties":{"p":{"$ref":"#/$defs/D%d"},"q":{"$ref":"#/$defs/D%d"}},"required":["p","q"]}`, i, i+1, i+1)
+	}
+	fmt.Fprintf(&sb, `,"D%d":{"type":"string"}}}`, levels)
+
+	schema, err := ParseSchema(sb.String())
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	if err := schema.Validate(); err != nil {
+		t.Fatalf("chain of terminating definitions should validate: %v", err)
+	}
+}
+
+// Caching a termination verdict is only sound when computing it never ran into
+// the entry stack. Here D2's verdict computed while entering through D1 is cut
+// short by the stack (D2 -> D1 -> D2), but standalone D2 terminates because
+// D1's second anyOf branch is a plain string. A poisoned cache would reject
+// this schema; it is valid: {"p":"s","q":{"y":"s"}} satisfies it.
+func TestRefTerminationVerdictIsNotCachedAcrossEntryStacks(t *testing.T) {
+	raw := `{
+		"type": "object",
+		"properties": {
+			"p": {"$ref": "#/$defs/D1"},
+			"q": {"$ref": "#/$defs/D2"}
+		},
+		"required": ["p", "q"],
+		"$defs": {
+			"D1": {
+				"anyOf": [
+					{"type": "object", "properties": {"x": {"$ref": "#/$defs/D2"}}, "required": ["x"]},
+					{"type": "string"}
+				]
+			},
+			"D2": {"type": "object", "properties": {"y": {"$ref": "#/$defs/D1"}}, "required": ["y"]}
+		}
+	}`
+
+	schema, err := ParseSchema(raw)
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	if err := schema.Validate(); err != nil {
+		t.Fatalf("schema with a finite instance should validate: %v", err)
+	}
+}
+
+// A diamond chain that closes a cycle has no finite instance, but proving it by
+// walking costs 2^n walks: every path is cut by the cycle guard, so nothing is
+// memoizable. The shared step budget fails closed instead of hanging.
+func TestRefTerminationFailsClosedBeyondStepBudget(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"type":"object","properties":{"root":{"$ref":"#/$defs/D1"}},"required":["root"],"$defs":{`)
+	const levels = 25
+	for i := 1; i < levels; i++ {
+		if i > 1 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `"D%d":{"type":"object","properties":{"p":{"$ref":"#/$defs/D%d"},"q":{"$ref":"#/$defs/D%d"}},"required":["p","q"]}`, i, i+1, i+1)
+	}
+	fmt.Fprintf(&sb, `,"D%d":{"type":"object","properties":{"back":{"$ref":"#/$defs/D1"}},"required":["back"]}}}`, levels)
+
+	schema, err := ParseSchema(sb.String())
+	if err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	err = schema.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of a cycle with no finite instance")
+	}
+	if !strings.Contains(err.Error(), "too complex") && !strings.Contains(err.Error(), "infinite recursion") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
