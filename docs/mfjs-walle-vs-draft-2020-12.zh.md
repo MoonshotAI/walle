@@ -36,13 +36,13 @@
 | Keyword | walle |
 | --- | --- |
 | `allOf` | ❌ |
-| `anyOf` | ✅ 分支数量可能有限制；与 `type` / `$ref` **不得同级**（`type` 须在分支内） |
+| `anyOf` | ✅ 分支数量可能有限制；同级可带 `type` 等约束（按 AND 生效），`Canonical` 会把它们分发进每个分支 |
 | `oneOf` | ❌ |
 | `if` | ❌ |
 | `then` | ❌ |
 | `else` | ❌ |
 | `not` | ❌ |
-| `properties` | ✅ `type: object` 时；**key 不可** 为 `$defs`、`$ref`、`anyOf`、`required`、`additionalProperties`；**不可重复**；`required` 中每项须在 `properties` 中声明 |
+| `properties` | ✅ `type: object` 时；**key 不可** 为 `$defs`、`$ref`、`anyOf`、`required`、`additionalProperties`；**不可重复**；`required` 中未在 `properties` 声明的项 lite 放行，`Canonical` 会把它剔除 |
 | `additionalProperties` | ✅ 值为 **boolean 或 object**；未指定时 **默认 true** |
 | `patternProperties` | ❌ |
 | `dependentSchemas` | ❌ |
@@ -134,9 +134,11 @@
 | 主题 | walle |
 | --- | --- |
 | 空 object subschema `{}` | 仅 **整份 root 为 `{}`** 或 **`additionalProperties` 值为 `{}`** 表示 **ANY**；**`properties` 内 `{}` 不自动视为 ANY** |
-| `type` 与 `anyOf` / `$ref` 同级 | **禁止**；`type` 须在 `anyOf` / `$ref` 目标内部 |
+| `type` 与 `anyOf` 同级 | **允许**（2020-12 按 AND 生效）；lite 放行，`Canonical` 把 `type` 分发进每个分支，与父层矛盾的分支丢弃、全部丢弃则该子 schema 退化为 `{}` |
+| `type` 与 `$ref` 同级 | **允许**（2020-12 按 AND 生效）；lite 放行，ultra 折叠进引用目标；与目标 `type` 交集为空时属恒假，lite 仍放行但 Canonical 把该子 schema 退化为 `{}`，strict 及以上拒绝 |
 | `object` 上允许的 keyword | **仅** `type`、`properties`、`required`、`additionalProperties`、`anyOf`、`$ref`（及注解规则中的 `description` / `title` 等） |
-| `anyOf` / `$ref` 同级其它 keyword | 除 `description` / `title` 外，**root** 可额外有 `$defs` / `$id` |
+| `anyOf` 同级其它 keyword | 允许约束关键字，**root** 可额外有 `$defs` / `$id`；`Canonical` 把约束分发进各分支，`description` / `title` 留在原处 |
+| `$ref` 同级其它 keyword | **允许**约束关键字；lite 放行，ultra 内联展开并对同名关键字取更严的一侧，详见 [validation-principles.zh.md](./validation-principles.zh.md) |
 | 嵌套与规模 | 如 **全 schema 中 object properties 数量可能有限制（累计）**、**嵌套层数可能有限制**（以 [walle.zh.md](./walle.zh.md) 为准） |
 | 数值与枚举字面量 | 整数 **十进制**；浮点 **无科学计数法**；等 |
 

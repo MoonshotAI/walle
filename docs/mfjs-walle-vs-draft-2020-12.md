@@ -21,7 +21,7 @@ This document summarizes how the **walle** validator handles each keyword in **J
 | --- | --- |
 | `$id` | ✅ **Root only**; value must be a string. |
 | `$schema` | ❌ |
-| `$ref` | ✅ **In-document references only**; remote / URL / cross-file references are disallowed; infinite recursion must be avoided. |
+| `$ref` | ✅ **In-document references only**; remote / URL / cross-file references are disallowed; infinite recursion must be avoided (the test is whether a finite instance exists); siblings of `$ref` apply as a logical AND, per 2020-12. |
 | `$comment` | ❌ |
 | `$defs` | ✅ **Root only**; **definition names must not contain `/`**. |
 | `$anchor` | ❌ |
@@ -36,13 +36,13 @@ This document summarizes how the **walle** validator handles each keyword in **J
 | Keyword | walle |
 | --- | --- |
 | `allOf` | ❌ |
-| `anyOf` | ✅ Branch count **may be capped**; `type` must **not** appear beside `anyOf` / `$ref` at the same level—declare `type` **inside** each branch. |
+| `anyOf` | ✅ Branch count **may be capped**; constraints such as `type` may sit beside it—they apply as a logical AND, and `Canonical` distributes them into every branch. |
 | `oneOf` | ❌ |
 | `if` | ❌ |
 | `then` | ❌ |
 | `else` | ❌ |
 | `not` | ❌ |
-| `properties` | ✅ When `type` is `object`: **keys must not** be `$defs`, `$ref`, `anyOf`, `required`, or `additionalProperties`; **no duplicate keys**; every name in `required` must appear in `properties`. |
+| `properties` | ✅ When `type` is `object`: **keys must not** be `$defs`, `$ref`, `anyOf`, `required`, or `additionalProperties`; **no duplicate keys**. A name in `required` that `properties` does not declare is accepted by lite and pruned by `Canonical`. |
 | `additionalProperties` | ✅ Value must be a **boolean** or an **object**; if omitted, **defaults to true**. |
 | `patternProperties` | ❌ |
 | `dependentSchemas` | ❌ |
@@ -134,9 +134,11 @@ This document summarizes how the **walle** validator handles each keyword in **J
 | Topic | walle |
 | --- | --- |
 | Empty object subschema `{}` | **ANY** is expressed only when the **entire root** is `{}` or when **`additionalProperties`** is `{}`. A `{}` **inside** `properties` is **not** treated as ANY. |
-| `type` alongside `anyOf` / `$ref` | **Disallowed**; put `type` **inside** the `anyOf` branch or the `$ref` target. |
+| `type` alongside `anyOf` | **Allowed**—2020-12 applies it as a logical AND. lite accepts it and `Canonical` pushes it into every branch, dropping the branches it contradicts; if that leaves no branch, the subschema degrades to `{}`. |
+| `type` alongside `$ref` | **Allowed**—2020-12 applies it as a logical AND. lite accepts it and ultra folds it into the target. An empty intersection with the target's `type` admits no instance: lite still accepts it but `Canonical` degrades that subschema to `{}`, and strict and above reject it. |
 | Keywords allowed on `object` | **`type`**, **`properties`**, **`required`**, **`additionalProperties`**, **`anyOf`**, **`$ref`**, plus annotations such as **`description`** / **`title`** where rules allow. |
-| Siblings of `anyOf` / `$ref` | Besides **`description`** / **`title`**, the **root** may also include **`$defs`** / **`$id`**. |
+| Siblings of `anyOf` | Constraint keywords are allowed, and the **root** may also include **`$defs`** / **`$id`**. `Canonical` distributes the constraints into every branch and leaves **`description`** / **`title`** where they are. |
+| Siblings of `$ref` | Constraint keywords are **allowed**. lite accepts them; ultra inlines the definition and keeps the stricter value for each shared keyword—see [validation-principles.md](./validation-principles.md). |
 | Nesting and size | For example, **total `properties` keys across objects** and **nesting depth** **may be limited**—see **[walle.md](./walle.md)**. |
 | Numeric and enum literals | Integers **decimal only**; floating-point **no scientific notation**; further bounds as in **walle.md**. |
 

@@ -18,9 +18,20 @@ type schemaValidator struct {
 	validateItemsRange   KeywordValidatorFunc
 	defDepths            map[string]int
 	totalPropKeys        int
+	terminationMemo      map[string]bool
+	refWalkSteps         int
 	utils                *validateUtils
 	config               SchemaValidatorConfig
 }
+
+// maxRefWalkSteps caps the total number of nodes the reference walkers (defs
+// depth computation and reference termination checking) may visit during one
+// validation. Chains of definitions forming diamonds -- or diamonds closing a
+// long cycle -- cost 2^n walks without memoization; past this budget
+// validation fails closed instead of hanging on adversarial schemas. Honest
+// schemas stay orders of magnitude below it: memoized walks are linear in the
+// number of definitions.
+const maxRefWalkSteps = 500000
 
 func newSchemaValidator(options ...SchemaValidatorOption) *schemaValidator {
 	config := DefaultValidatorConfig()
@@ -64,6 +75,8 @@ func (v *schemaValidator) Reset() {
 	v.context = newValidationContext()
 	v.defDepths = make(map[string]int)
 	v.totalPropKeys = 0
+	v.terminationMemo = nil
+	v.refWalkSteps = 0
 	// won't reset config
 }
 
@@ -109,7 +122,12 @@ func (v *schemaValidator) CheckAnyOfConflicts(schema SchemaDict, path schemaPath
 		var conflicts []string
 		for k := range branchKeywords {
 			if _, exists := outerKeywords[k]; exists {
-				if CommonKeywords[k] && !(v.config.IsUltra() || v.config.IsTest()) {
+				// Constraining an instance both directly and inside a branch is legal
+				// under 2020-12: both apply and the effective constraint is their
+				// conjunction. Only the canonicalising levels report it, so that
+				// Canonical distributes the parent copy into the branches while looser
+				// levels accept the schema as written.
+				if !(v.config.IsUltra() || v.config.IsTest()) {
 					continue
 				}
 				conflicts = append(conflicts, k)
@@ -123,7 +141,7 @@ func (v *schemaValidator) CheckAnyOfConflicts(schema SchemaDict, path schemaPath
 					`conflicting keywords found in anyOf with parent: keywords (%s) are defined on the parent schema and inside anyOf; remove them from the parent or from anyOf branches`,
 					strings.Join(conflicts, ", "),
 				),
-				path, simplifyFuncForKeywordConflicts(conflicts),
+				path, simplifyFuncForAnyOfParentConflicts(conflicts),
 			)
 		}
 	}
@@ -153,14 +171,12 @@ func (v *schemaValidator) TraverseSchema(schema SchemaDict, path schemaPath, cur
 
 	if len(unsupported) > 0 && (v.config.IsUltra() || v.config.IsTest()) {
 		sort.Strings(unsupported)
-		simplifyFunc := SimplifyDefault
-		for _, keyword := range unsupported {
-			if keyword == "$schema" {
-				simplifyFunc = SimplifyRemoveSchemaKeys([]string{"$schema"})
-				break
-			}
-		}
-		return currentDepth, v.context.RaiseErrorWithSimplify(fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")), path, simplifyFunc)
+		// Drop just the unsupported keywords; the enforcer ignores keys it does not
+		// know, so keeping the rest of the schema is both safe and closer to intent.
+		return currentDepth, v.context.RaiseErrorWithSimplify(
+			fmt.Sprintf("unsupported keywords: %s", strings.Join(unsupported, ", ")),
+			path, SimplifyRemoveSchemaKeys(unsupported),
+		)
 	}
 
 	// Process $defs first
@@ -190,19 +206,52 @@ func (v *schemaValidator) TraverseSchema(schema SchemaDict, path schemaPath, cur
 		}
 	}
 
+	// A contradiction between $ref and its siblings is reported before any other
+	// $ref rule. The rules below delete siblings to canonicalise the node, and
+	// once a contradicting sibling is gone the remaining schema happily accepts
+	// what the original rejected.
+	//
+	// Strict and above reject it, matching how a lower bound above its upper bound
+	// is handled: both are contradictions inside one node, and neither used to
+	// stop lite. Looser levels accept the schema and rely on canonicalisation to
+	// drop the contradicting keyword.
+	if _, hasRef := schema[Ref]; hasRef && v.config.IsGreaterThanStrict() {
+		if keyword := v.refSiblingContradiction(schema, path); keyword != "" {
+			return currentDepth, v.context.RaiseErrorWithSimplify(
+				fmt.Sprintf(
+					"%s conflicts with the referenced schema: the intersection is empty, so no instance can satisfy both",
+					keyword,
+				),
+				path, SimplifyDropContradictingRefSibling,
+			)
+		}
+	}
+
 	// Check type and anyOf/ref conflicts
 	if _, hasType := schema[Type]; hasType {
 		if _, hasAnyOf := schema[AnyOf]; hasAnyOf {
-			return currentDepth, v.context.RaiseErrorWithSimplify(
-				"when using anyOf, type should be defined in anyOf items instead of the parent schema",
-				path, SimplifyRemoveType,
-			)
+			// A type beside anyOf is legal under 2020-12: it applies on top of
+			// whichever branch matches. The enforcer's anyOf cannot carry a conjunct,
+			// so only the canonicalising levels report it and the type is pushed into
+			// the branches; looser levels accept the schema as written.
+			if v.config.IsUltra() || v.config.IsTest() {
+				return currentDepth, v.context.RaiseErrorWithSimplify(
+					"when using anyOf, type should be defined in anyOf items instead of the parent schema",
+					path, SimplifyDistributeAnyOfParent,
+				)
+			}
 		}
 		if _, hasRef := schema[Ref]; hasRef {
-			return currentDepth, v.context.RaiseErrorWithSimplify(
-				"when using $ref, type should be defined in the referenced schema instead of the parent schema",
-				path, SimplifyRemoveType,
-			)
+			// A compatible type next to $ref is legal under 2020-12: both assertions
+			// apply and the intersection is non-empty, which the check above already
+			// established. Only the canonicalising levels fold it away, so looser
+			// levels accept the schema as written.
+			if v.config.IsUltra() || v.config.IsTest() {
+				return currentDepth, v.context.RaiseErrorWithSimplify(
+					"when using $ref, type should be defined in the referenced schema instead of the parent schema",
+					path, SimplifyRemoveType,
+				)
+			}
 		}
 
 		if typeList, ok := schema[Type].(SchemaList); ok && len(typeList) > 1 {
@@ -403,12 +452,23 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 			}
 		}
 
+		// A lower bound above its upper bound admits no instance at all, so strict
+		// reports it too even though the keyword checks below stay ultra-only. A
+		// type this function does not recognise is left to ValidateType to report.
+		if len(types) >= 1 && v.config.IsStrict() {
+			if allowedKeywords, err := v.computeAllowedKeywordsForTypes(path, types); err == nil {
+				if err := v.validateRangeKeywordsForAllowedTypes(schema, path, allowedKeywords); err != nil {
+					return err
+				}
+			}
+		}
+
 		if len(types) >= 1 && (v.config.IsUltra() || v.config.IsTest()) {
 			// Check $defs and $id are only at top level
 			if !path.IsRoot() {
 				for k := range schema {
 					if TopLevelOnlyKeywords[k] {
-						return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s must be at root level", k), path, SimplifyDefault)
+						return v.context.RaiseErrorWithSimplify(fmt.Sprintf("keyword %s must be at root level", k), path, SimplifyRemoveSchemaKeys([]string{k}))
 					}
 				}
 			}
@@ -574,12 +634,35 @@ func (v *schemaValidator) Validate(schema any) error {
 }
 
 func (v *schemaValidator) CanonicalWithMaxAttempts(schema Schema, maxAttempts int) (string, error) {
-	currentSchema := Schema(hoistLocalRefs(schema))
+	// Fold sibling constraints into their $ref target or anyOf branches before
+	// validating. Left to the retry loop these siblings would simply be deleted,
+	// which silently loosens the schema whenever the sibling was the stricter of
+	// the two. anyOf is distributed first because doing so can leave a constraint
+	// beside a branch's $ref, which is what the inlining pass then folds in.
+	inlined, droppedSiblings := inlineConflictingRefSiblings(
+		distributeAnyOfParentKeywords(hoistLocalRefs(schema)),
+		v.config.MaxSchemaSize,
+	)
+	currentSchema := Schema(inlined)
 
+	// Siblings the copy budget could not fold in were dropped in one pass rather
+	// than one retry at a time; surface exactly what was lost as the warning.
 	var rawErr error
+	if len(droppedSiblings) > 0 {
+		const maxReported = 5
+		shown := droppedSiblings
+		if len(shown) > maxReported {
+			shown = droppedSiblings[:maxReported]
+		}
+		rawErr = fmt.Errorf(
+			"inlining every $ref would exceed the schema size limit, so %d sibling constraint(s) were dropped instead: %s",
+			len(droppedSiblings), strings.Join(shown, ", "),
+		)
+	}
+
 	for i := 0; i < maxAttempts; i++ {
 		err := v.Validate(currentSchema)
-		if i == 0 {
+		if i == 0 && err != nil {
 			rawErr = err
 		}
 		if err == nil {
@@ -623,7 +706,11 @@ func (v *schemaValidator) validateSchemaDict(schema SchemaDict) error {
 	}
 
 	// Precompute defs depth
-	v.defDepths = v.CalculateDefDepths()
+	defDepths, err := v.CalculateDefDepths()
+	if err != nil {
+		return err
+	}
+	v.defDepths = defDepths
 
 	// Verify schema
 	maxDepth, err := v.TraverseSchema(schema, rootSchemaPath, 0)
@@ -639,6 +726,24 @@ func (v *schemaValidator) validateSchemaDict(schema SchemaDict) error {
 	return v.PostValidateRefs()
 }
 
+// refSiblingContradiction names a keyword that the node and the schema it
+// references constrain in ways that cannot both hold, or "" when they can. A
+// reference that cannot be resolved is not a contradiction; PostValidateRefs
+// reports that separately.
+func (v *schemaValidator) refSiblingContradiction(schema SchemaDict, path schemaPath) string {
+	refStr, ok := schema[Ref].(string)
+	if !ok {
+		return ""
+	}
+
+	target, err := v.utils.ResolveRef(v.context.SchemaRoot, refStr, v.context, path)
+	if err != nil || target == nil {
+		return ""
+	}
+
+	return unsatisfiableOverlap(schema, target)
+}
+
 // PostValidateRefs validates all references after schema traversal
 func (v *schemaValidator) PostValidateRefs() error {
 	// Verify all ref paths exist
@@ -648,15 +753,10 @@ func (v *schemaValidator) PostValidateRefs() error {
 		}
 	}
 
-	// first check root schema whether it can terminate
-	needCheckTermination := true
-	if terminates, err := v.CheckRefTermination(v.context.SchemaRoot, make(map[string]struct{}), rootSchemaPath); err == nil {
-		if terminates {
-			needCheckTermination = false
-		}
-	}
-	// Traverse and check all references
-	return v.TraverseAndCheckRefs(v.context.SchemaRoot, needCheckTermination, nil, rootSchemaPath)
+	// Every $ref has to be able to terminate. Short-circuiting on the root was not
+	// enough: the root normally terminates because its own properties are optional,
+	// which masked non-terminating definitions nested inside $defs.
+	return v.TraverseAndCheckRefs(v.context.SchemaRoot, true, nil, rootSchemaPath)
 }
 
 // TraverseAndCheckRefs traverses the schema and checks all references
@@ -749,26 +849,51 @@ func (v *schemaValidator) TraverseAndCheckRefs(schema SchemaDict, needCheckTermi
 	return nil
 }
 
-func (v *schemaValidator) CalculateDefDepths() map[string]int {
+// CalculateDefDepths computes the nesting depth each definition expands to.
+// Like the termination check it memoizes expanded definitions -- keyed by the
+// same purity rule, a depth computed without running into the path stack -- and
+// gives up with an error past the shared step budget.
+func (v *schemaValidator) CalculateDefDepths() (map[string]int, error) {
 	defDepths := make(map[string]int)
+	memo := make(map[string]int)
 
-	var calculateDepthsRecursive func(schema SchemaDict, currentPath string, visitedRefs map[string]struct{}) int
-	calculateDepthsRecursive = func(schema SchemaDict, currentPath string, visitedRefs map[string]struct{}) int {
+	var calculateDepthsRecursive func(schema SchemaDict, currentPath string, visitedRefs map[string]struct{}) (int, bool, error)
+	calculateDepthsRecursive = func(schema SchemaDict, currentPath string, visitedRefs map[string]struct{}) (int, bool, error) {
+		v.refWalkSteps++
+		if v.refWalkSteps > maxRefWalkSteps {
+			return 0, false, v.context.RaiseError("reference graph is too complex to validate within the step budget", rootSchemaPath)
+		}
+
 		// The depth of basic type or empty schema is 0
 		if len(schema) == 0 {
-			return 0
+			return 0, false, nil
 		}
 
 		// Record the depth of current path
 		defDepths[currentPath] = 0 // Initial depth is 0
 		maxDepth := 0
+		cut := false
 
 		if ref, ok := schema[Ref].(string); ok {
-			if _, exists := visitedRefs[ref]; !exists {
+			if _, exists := visitedRefs[ref]; exists {
+				// Cycle guard: the ref contributes no depth, and the result may
+				// depend on the entry stack, so it must not be cached.
+				cut = true
+			} else if depth, done := memo[ref]; done {
+				maxDepth = depth
+			} else {
 				visitedRefs[ref] = struct{}{}
 				resolved, err := v.utils.ResolveRef(v.context.SchemaRoot, ref, v.context, rootSchemaPath)
 				if err == nil && resolved != nil {
-					maxDepth = calculateDepthsRecursive(resolved, ref, visitedRefs)
+					depth, refCut, err := calculateDepthsRecursive(resolved, ref, visitedRefs)
+					if err != nil {
+						return 0, false, err
+					}
+					if !refCut {
+						memo[ref] = depth
+					}
+					cut = cut || refCut
+					maxDepth = depth
 				}
 			}
 		}
@@ -788,7 +913,11 @@ func (v *schemaValidator) CalculateDefDepths() map[string]int {
 					propVisited[k] = v
 				}
 
-				subDepth := calculateDepthsRecursive(propSchemaObj, propPath, propVisited)
+				subDepth, propCut, err := calculateDepthsRecursive(propSchemaObj, propPath, propVisited)
+				if err != nil {
+					return 0, false, err
+				}
+				cut = cut || propCut
 				if 1+subDepth > propsDepth {
 					propsDepth = 1 + subDepth
 				}
@@ -812,7 +941,11 @@ func (v *schemaValidator) CalculateDefDepths() map[string]int {
 					branchVisited[k] = v
 				}
 
-				subDepth := calculateDepthsRecursive(subSchemaObj, subPath, branchVisited)
+				subDepth, branchCut, err := calculateDepthsRecursive(subSchemaObj, subPath, branchVisited)
+				if err != nil {
+					return 0, false, err
+				}
+				cut = cut || branchCut
 				if subDepth > maxDepth {
 					maxDepth = subDepth
 				}
@@ -828,7 +961,11 @@ func (v *schemaValidator) CalculateDefDepths() map[string]int {
 				addPropsVisited[k] = v
 			}
 
-			subDepth := calculateDepthsRecursive(addProps, addPropsPath, addPropsVisited)
+			subDepth, addPropsCut, err := calculateDepthsRecursive(addProps, addPropsPath, addPropsVisited)
+			if err != nil {
+				return 0, false, err
+			}
+			cut = cut || addPropsCut
 			if subDepth > maxDepth {
 				maxDepth = subDepth
 			}
@@ -836,7 +973,7 @@ func (v *schemaValidator) CalculateDefDepths() map[string]int {
 
 		// Update the final depth of current path
 		defDepths[currentPath] = maxDepth
-		return maxDepth
+		return maxDepth, cut, nil
 	}
 
 	// Traverse from $defs
@@ -847,28 +984,55 @@ func (v *schemaValidator) CalculateDefDepths() map[string]int {
 				continue
 			}
 			basePath := fmt.Sprintf("#/$defs/%s", defName)
-			calculateDepthsRecursive(defSchemaObj, basePath, make(map[string]struct{}))
+			if _, _, err := calculateDepthsRecursive(defSchemaObj, basePath, make(map[string]struct{})); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	return defDepths
+	return defDepths, nil
 }
 
 // CheckRefTermination checks if a reference can be terminated
 func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map[string]struct{}, path schemaPath) (bool, error) {
+	// The memo is shared across every call of one validation, so a definition
+	// is expanded once no matter how many use sites point at it.
+	if v.terminationMemo == nil {
+		v.terminationMemo = make(map[string]bool)
+	}
+	terminates, _, err := v.checkRefTermination(schema, visitedRefs, v.terminationMemo, path)
+	return terminates, err
+}
+
+// checkRefTermination is the recursive body of CheckRefTermination. The memo
+// caches the verdict of each fully expanded $ref, so sibling properties that
+// point at the same definition do not each re-walk its whole subgraph --
+// without it a chain of definitions referenced twice per level costs 2^n walks.
+//
+// A verdict is cached only when computing it never ran into a reference already
+// on the path stack: such a verdict is a property of the definition alone and
+// holds for every later entry point. A walk that did run into the stack may
+// have been cut short by entry-specific state, so its verdict is used but not
+// cached. The second return value reports whether that happened.
+func (v *schemaValidator) checkRefTermination(schema SchemaDict, visitedRefs map[string]struct{}, memo map[string]bool, path schemaPath) (bool, bool, error) {
+	v.refWalkSteps++
+	if v.refWalkSteps > maxRefWalkSteps {
+		return false, false, v.context.RaiseError("reference graph is too complex to validate within the step budget", path)
+	}
+
 	// Non-object/array basic types can terminate
 	var checkType string
 	if typeVal, ok := schema[Type]; ok {
 		switch t := typeVal.(type) {
 		case string:
 			if t != Object && t != Array {
-				return true, nil
+				return true, false, nil
 			}
 			checkType = t
 		case SchemaList:
 			for _, typ := range t {
 				if typeStr, ok := typ.(string); ok && typeStr != Object && typeStr != Array {
-					return true, nil
+					return true, false, nil
 				}
 
 				// should be object or array and len(t) == 1/2
@@ -877,26 +1041,36 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 		}
 	}
 
+	cut := false
+
 	// Array items if empty can terminate
 	if checkType == Array {
+		// Without a positive minItems the empty array is a valid instance, so the
+		// array terminates no matter what items demands. Only a non-empty lower
+		// bound forces us to prove that items itself can terminate.
+		if minItems, ok := schema[MinItems].(float64); !ok || minItems <= 0 {
+			return true, false, nil
+		}
+
 		items, exists := schema[Items]
 		if !exists || items == nil {
-			return true, nil
+			return true, false, nil
 		}
 
 		if itemsDict, ok := items.(SchemaDict); ok && len(itemsDict) == 0 {
-			return true, nil
+			return true, false, nil
 		}
 
 		// check array items whether it can terminate
 		if itemsDict, ok := items.(SchemaDict); ok {
-			terminates, err := v.CheckRefTermination(itemsDict, visitedRefs, path.Append(Items))
+			terminates, itemsCut, err := v.checkRefTermination(itemsDict, visitedRefs, memo, path.Append(Items))
 			if err != nil {
-				return false, err
+				return false, false, err
 			}
 			if terminates {
-				return true, nil
+				return true, itemsCut, nil
 			}
+			cut = cut || itemsCut
 		}
 	}
 
@@ -905,17 +1079,17 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 		required, exists := schema[Required]
 		// required if empty can terminate
 		if !exists || required == nil {
-			return true, nil
+			return true, false, nil
 		}
 
 		if requiredList, ok := required.(SchemaList); ok && len(requiredList) == 0 {
-			return true, nil
+			return true, false, nil
 		}
 
 		// if properties is empty, it can terminate
 		props, hasProps := schema[Properties].(SchemaDict)
 		if !hasProps || len(props) == 0 {
-			return true, nil
+			return true, false, nil
 		}
 
 		// iterate properties
@@ -926,10 +1100,13 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 			}
 		}
 
+		// Every required property has to be present in a valid instance, so the
+		// object only terminates when all of them do. A single non-terminating
+		// required property makes the object unsatisfiable by any finite document.
 		for propName, propSchema := range props {
 			propSchemaObj, ok := propSchema.(SchemaDict)
 			if !ok {
-				return false, v.context.RaiseErrorWithSimplify("property schema must be an object", path.Append(propName), SimplifyRemoveProperties)
+				return false, false, v.context.RaiseErrorWithSimplify("property schema must be an object", path.Append(propName), SimplifyRemoveProperties)
 			}
 
 			// only check required properties
@@ -937,26 +1114,38 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 				continue
 			}
 
-			if terminates, err := v.CheckRefTermination(propSchemaObj, visitedRefs, path.Append(Properties, propName)); err != nil {
-				return false, err
-			} else if terminates {
-				return true, nil
+			// Each property walks its own visited set; two sibling properties
+			// pointing at the same $ref is not a cycle.
+			propRefs := make(map[string]struct{})
+			for k := range visitedRefs {
+				propRefs[k] = struct{}{}
 			}
+
+			terminates, propCut, err := v.checkRefTermination(propSchemaObj, propRefs, memo, path.Append(Properties, propName))
+			if err != nil {
+				return false, false, err
+			}
+			if !terminates {
+				return false, propCut, nil
+			}
+			cut = cut || propCut
 		}
+
+		return true, cut, nil
 	}
 
 	// Check anyOf branches
 	if anyOf, ok := schema[AnyOf].(SchemaList); ok {
 		// if anyOf is empty, it can terminate
 		if len(anyOf) == 0 {
-			return true, nil
+			return true, false, nil
 		}
 
 		allRefs := make(map[string]struct{})
 		for i, item := range anyOf {
 			itemSchema, ok := item.(SchemaDict)
 			if !ok {
-				return false, v.context.RaiseErrorWithSimplify("schema in anyOf must be an object", path.Append(AnyOf), SimplifyRemoveAnyOf)
+				return false, false, v.context.RaiseErrorWithSimplify("schema in anyOf must be an object", path.Append(AnyOf), SimplifyRemoveAnyOf)
 			}
 
 			// Create a new copy of visited refs for each branch
@@ -965,15 +1154,18 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 				branchRefs[k] = struct{}{}
 			}
 
-			if terminates, err := v.CheckRefTermination(itemSchema, branchRefs, path.Append(AnyOf, strconv.Itoa(i))); err != nil {
-				return false, err
-			} else if terminates {
+			terminates, branchCut, err := v.checkRefTermination(itemSchema, branchRefs, memo, path.Append(AnyOf, strconv.Itoa(i)))
+			if err != nil {
+				return false, false, err
+			}
+			if terminates {
 				// Update visited refs with branch refs
 				for k := range branchRefs {
 					visitedRefs[k] = struct{}{}
 				}
-				return true, nil
+				return true, branchCut, nil
 			}
+			cut = cut || branchCut
 
 			// Collect all refs from this branch
 			for k := range branchRefs {
@@ -990,23 +1182,34 @@ func (v *schemaValidator) CheckRefTermination(schema SchemaDict, visitedRefs map
 	// Check ref
 	if ref, ok := schema[Ref].(string); ok {
 		if _, exists := visitedRefs[ref]; exists {
-			return false, nil
+			return false, true, nil
+		}
+
+		if result, done := memo[ref]; done {
+			return result, false, nil
 		}
 
 		visitedRefs[ref] = struct{}{}
 		target, err := v.utils.ResolveRef(v.context.SchemaRoot, ref, v.context, path)
 		if err != nil {
-			return false, v.context.RaiseError(fmt.Sprintf("invalid $ref path: %s", ref), path)
+			return false, false, v.context.RaiseError(fmt.Sprintf("invalid $ref path: %s", ref), path)
 		}
 
-		return v.CheckRefTermination(target, visitedRefs, path.Append(Ref))
+		result, targetCut, err := v.checkRefTermination(target, visitedRefs, memo, path.Append(Ref))
+		if err != nil {
+			return false, false, err
+		}
+		if !targetCut {
+			memo[ref] = result
+		}
+		return result, targetCut, nil
 	}
 
 	if len(schema) == 0 {
-		return true, nil
+		return true, false, nil
 	}
 
-	return false, nil
+	return false, cut, nil
 }
 
 // ExpandRef expands a reference
@@ -1136,10 +1339,27 @@ func (v *schemaValidator) CheckRefContext(parent SchemaDict, refSchema SchemaDic
 		}
 	}
 
+	// Contradictory overlaps come first: their conjunction admits no instance at
+	// all, so no amount of merging produces a usable schema. Only strict and above
+	// reject them; see TraverseSchema for why looser levels let them through.
+	if keyword := unsatisfiableOverlap(parent, refSchema); keyword != "" && v.config.IsGreaterThanStrict() {
+		return v.context.RaiseErrorWithSimplify(
+			fmt.Sprintf(
+				"%s conflicts with the referenced schema: the intersection is empty, so no instance can satisfy both",
+				keyword,
+			),
+			path, SimplifyDropContradictingRefSibling,
+		)
+	}
+
 	var conflicts []string
 	for k := range refSchema {
 		if _, exists := parentKeywords[k]; exists {
-			if CommonKeywords[k] && !(v.config.IsUltra() || v.config.IsTest()) {
+			// Repeating a keyword next to $ref is legal under 2020-12: both
+			// assertions apply and the effective constraint is their conjunction.
+			// Only the canonicalising levels report it, so that Canonical folds the
+			// duplicate away while looser levels accept the schema as written.
+			if !(v.config.IsUltra() || v.config.IsTest()) {
 				continue
 			}
 			conflicts = append(conflicts, k)

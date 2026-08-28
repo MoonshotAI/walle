@@ -47,13 +47,10 @@ func (v *keywordValidators) ValidateProperties(value any, context *validationCon
 		return context.RaiseErrorWithSimplify("properties must be an object", path, SimplifyRemoveProperties)
 	}
 
+	// The empty string is a property name like any other: 2020-12 puts no
+	// constraint on the keys of properties, and the enforcer handles it, down to
+	// generating {"": ...}. It is not checked or rewritten here.
 	for propName, propSchema := range props {
-		if v.config.IsUltra() || v.config.IsTest() {
-			if propName == "" {
-				return context.RaiseErrorWithSimplify("property name cannot be empty", path, SimplifyDefault)
-			}
-		}
-
 		if InvalidPropertyNames[propName] && v.config.IsGreaterThanStrict() {
 			return context.RaiseErrorWithSimplify(fmt.Sprintf("property name '%s' is reserved for JSON Schema keywords", propName), path, SimplifyRemoveSubSchema)
 		}
@@ -77,17 +74,12 @@ func (v *keywordValidators) ValidateRequired(value any, context *validationConte
 		return nil
 	}
 
-	// Check that all required properties are strings
+	// Requiring the empty-string property is legal and the enforcer supports it, so
+	// only the entry's type is checked here. Whether the property is declared at all
+	// is checked further down, for the empty string like for any other name.
 	for _, prop := range required {
-		propStr, ok := prop.(string)
-		if !ok {
+		if _, ok := prop.(string); !ok {
 			return context.RaiseErrorWithSimplify("items in required array must be strings", path, SimplifyRemoveRequired)
-		}
-
-		if v.config.IsUltra() || v.config.IsTest() {
-			if propStr == "" {
-				return context.RaiseErrorWithSimplify("property names in required array cannot be empty", path, SimplifyRemoveRequired)
-			}
 		}
 	}
 
@@ -122,31 +114,39 @@ func (v *keywordValidators) ValidateRequired(value any, context *validationConte
 		// Check if current schema is object type
 		schemaType, hasType := current[Type]
 		if !hasType {
-			return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyDefault)
+			return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyRemoveRequired)
 		}
 
 		switch t := schemaType.(type) {
 		case string:
 			if t != Object {
-				return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyDefault)
+				return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyRemoveRequired)
 			}
 		case SchemaList:
 			if len(t) != 1 || t[0] != Object {
-				return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyDefault)
+				return context.RaiseErrorWithSimplify("required keyword must be used with object", path, SimplifyRemoveRequired)
 			}
 		}
 
 		// Check if properties exists
 		if !hasProps {
-			return context.RaiseErrorWithSimplify("required specified but 'properties' keyword is missing", path, SimplifyDefault)
+			return context.RaiseErrorWithSimplify("required specified but 'properties' keyword is missing", path, SimplifyRemoveRequired)
 		}
 	}
 
-	// Check if all required fields are defined in properties
-	for _, prop := range required {
-		propStr := prop.(string)
-		if _, exists := props[propStr]; !exists {
-			return context.RaiseErrorWithSimplify(fmt.Sprintf("required property '%s' is not defined in properties", propStr), path, SimplifyRemoveRequired)
+	// Requiring a property the schema does not describe is legal under 2020-12: the
+	// instance has to carry it, with nothing said about its value. The enforcer has
+	// nothing to generate from that, so only the canonicalising levels report it and
+	// the entry is pruned; looser levels accept the schema as written.
+	if v.config.IsUltra() || v.config.IsTest() {
+		for _, prop := range required {
+			propStr := prop.(string)
+			if _, exists := props[propStr]; !exists {
+				return context.RaiseErrorWithSimplify(
+					fmt.Sprintf("required property '%s' is not defined in properties", propStr),
+					path, SimplifyPruneRequired,
+				)
+			}
 		}
 	}
 
@@ -234,25 +234,31 @@ func (v *keywordValidators) ValidateEnum(value any, context *validationContext, 
 		}
 	}
 
-	// Validate each enum value matches at least one type in typeList
-	for _, val := range enum {
-		matchesAnyType := false
-		for _, t := range typeList {
-			matches, err := v.utils.IsTypeMatch(val, t, context, path)
-			if err != nil {
-				return err
+	// An enum value of the wrong type is legal under 2020-12: type and enum both
+	// apply, so such a value is simply unreachable and the effective constraint is
+	// the intersection. Only the canonicalising levels report it, and the value is
+	// dropped from the enum rather than the enum from the schema; looser levels
+	// accept the schema as written.
+	if v.config.IsUltra() || v.config.IsTest() {
+		for _, val := range enum {
+			matchesAnyType := false
+			for _, t := range typeList {
+				matches, err := v.utils.IsTypeMatch(val, t, context, path)
+				if err != nil {
+					return err
+				}
+				if matches {
+					matchesAnyType = true
+					break
+				}
 			}
-			if matches {
-				matchesAnyType = true
-				break
-			}
-		}
 
-		if !matchesAnyType {
-			return context.RaiseErrorWithSimplify(
-				fmt.Sprintf("enum value (%v) does not match any type in %v", val, typeList),
-				path, SimplifyRemoveEnum,
-			)
+			if !matchesAnyType {
+				return context.RaiseErrorWithSimplify(
+					fmt.Sprintf("enum value (%v) does not match any type in %v", val, typeList),
+					path, v.simplifyIntersectEnumWithType(typeList),
+				)
+			}
 		}
 	}
 
@@ -349,23 +355,31 @@ func (v *keywordValidators) ValidateRef(value any, context *validationContext, p
 	}
 
 	// Check if $ref is allowed at the same level as other keywords
-	for key := range parentSchema {
-		if key == Ref {
-			continue
-		}
-
-		if is_root && TopLevelOnlyKeywords[key] {
-			continue
-		}
-
-		if v.config.IsUltra() || v.config.IsTest() {
-			if !CommonKeywords[key] {
-				return context.RaiseErrorWithSimplify(
-					fmt.Sprintf("keyword '%s' is not allowed at the same level as $ref", key),
-					path.StringWithoutLast(),
-					SimplifyDefault,
-				)
+	if v.config.IsUltra() || v.config.IsTest() {
+		var siblings []string
+		for key := range parentSchema {
+			if key == Ref {
+				continue
 			}
+
+			if is_root && TopLevelOnlyKeywords[key] {
+				continue
+			}
+
+			if !CommonKeywords[key] {
+				siblings = append(siblings, key)
+			}
+		}
+
+		if len(siblings) > 0 {
+			slices.Sort(siblings)
+			// Drop the offending siblings only. Keeping $ref and the rest of the
+			// schema preserves the referenced constraints instead of losing them all.
+			return context.RaiseErrorWithSimplify(
+				fmt.Sprintf("keyword '%s' is not allowed at the same level as $ref", siblings[0]),
+				path.StringWithoutLast(),
+				SimplifyRemoveSchemaKeys(siblings),
+			)
 		}
 	}
 
@@ -597,7 +611,7 @@ func (v *keywordValidators) ValidateLengthRange(value any, context *validationCo
 		if minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minLength (%v) cannot be greater than maxLength (%v)", minLength, maxLength),
-				path.Append(MinLength), SimplifyRemoveConstraints,
+				path.Append(MinLength), SimplifyDegradeEnclosingSchema,
 			)
 		}
 	}
@@ -685,7 +699,7 @@ func (v *keywordValidators) ValidateNumericRange(value any, context *validationC
 		if minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minimum (%v) cannot be greater than maximum (%v)", minimum, maximum),
-				path, SimplifyRemoveConstraints,
+				path, SimplifyRemoveParentSchema,
 			)
 		}
 	}
@@ -739,7 +753,7 @@ func (v *keywordValidators) ValidateItemsRange(value any, context *validationCon
 		if minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minItems (%v) cannot be greater than maxItems (%v)", minItems, maxItems),
-				path.Append(MinItems), SimplifyRemoveConstraints,
+				path.Append(MinItems), SimplifyDegradeEnclosingSchema,
 			)
 		}
 	}
