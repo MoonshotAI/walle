@@ -170,6 +170,22 @@ func SimplifyRemoveSchemaKeys(keys []string) SimplifyFunc {
 	}
 }
 
+// simplifyRemoveKeysAtNode deletes keys from the object that path names.
+// A single-part path such as "items" is that nested object, not the root.
+func simplifyRemoveKeysAtNode(keys ...string) SimplifyFunc {
+	keysCopy := append([]string(nil), keys...)
+	return func(schema Schema, path schemaPath) Schema {
+		current, err := resolveDictAtPath(schema, path)
+		if err != nil {
+			return make(Schema)
+		}
+		for _, k := range keysCopy {
+			delete(current, k)
+		}
+		return schema
+	}
+}
+
 // simplifyFuncForAnyOfParentConflicts picks how to resolve a keyword that a node
 // states both directly and inside its anyOf branches. A real constraint is pushed
 // into the branches so that the stricter of the two values survives; an annotation
@@ -392,6 +408,15 @@ func SimplifyRemoveItems(schema Schema, path schemaPath) Schema {
 
 func SimplifyRemoveDescription(schema Schema, path schemaPath) Schema {
 	err := removeAtPath(schema, path.Parent(), Description, true)
+	if err != nil {
+		return make(Schema)
+	}
+
+	return schema
+}
+
+func SimplifyRemoveTitle(schema Schema, path schemaPath) Schema {
+	err := removeAtPath(schema, path.Parent(), Title, true)
 	if err != nil {
 		return make(Schema)
 	}

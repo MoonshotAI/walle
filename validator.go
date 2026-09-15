@@ -57,6 +57,7 @@ func newSchemaValidator(options ...SchemaValidatorOption) *schemaValidator {
 	validator.keywordValidators[Items] = kv.ValidateItems
 	validator.keywordValidators[Ref] = kv.ValidateRef
 	validator.keywordValidators[Description] = kv.ValidateDescription
+	validator.keywordValidators[Title] = kv.ValidateTitle
 	validator.keywordValidators[AnyOf] = kv.ValidateAnyOf
 	validator.keywordValidators[AdditionalProperties] = kv.ValidateAdditionalProperties
 	validator.keywordValidators[Defs] = kv.ValidateDefs
@@ -452,10 +453,9 @@ func (v *schemaValidator) validateTypeAndKeywords(schema SchemaDict, path schema
 			}
 		}
 
-		// A lower bound above its upper bound admits no instance at all, so strict
-		// reports it too even though the keyword checks below stay ultra-only. A
-		// type this function does not recognise is left to ValidateType to report.
-		if len(types) >= 1 && v.config.IsStrict() {
+		// lite only needs this for JSON-null bounds. Other mistyped or
+		// contradictory bounds stay strict-and-above, as they did before.
+		if len(types) >= 1 && (v.config.IsLite() || v.config.IsStrict()) {
 			if allowedKeywords, err := v.computeAllowedKeywordsForTypes(path, types); err == nil {
 				if err := v.validateRangeKeywordsForAllowedTypes(schema, path, allowedKeywords); err != nil {
 					return err

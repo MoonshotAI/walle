@@ -41,15 +41,18 @@ Everything below is rejected by `lite` (the interface default).
 | `anyOf` is not an array | `anyOf must be an array` |
 | `anyOf` is an empty array | `anyOf must have 1-500 items` |
 | `$ref` is not a string | `$ref must be a string` |
-| `pattern` is not a string | `pattern must be a string` |
+| `pattern` is not a string (`null` excluded) | `pattern must be a string` |
 | `description` is not a string | `description must be a string` |
 | `additionalProperties` is not a boolean or an object | `additionalProperties must be a boolean or an object` |
 | `$defs` is not an object | `$defs must be an object` |
-| `$id` is not a string | `$id must be a string` |
+| `$id` is not a string (`null` excluded) | `$id must be a string` |
+| A numeric bound keyword is `null` | `minItems must be an integer` / `minimum must be a number` etc. |
 
 Size limits also apply at `lite`: 120000 bytes per schema, 30 levels of nesting, 3000 property keys across all objects, 1000 items per `enum`, and 500 `anyOf` branches.
 
-When a numeric bound keyword (`minLength` `maxLength` `minimum` `maximum` `minItems` `maxItems`) has a non-integer or negative value, `lite` accepts it and the rewrite corrects it; `strict` and above reject it.
+When a numeric bound keyword (`minLength` `maxLength` `minimum` `maximum` `minItems` `maxItems`) has a non-integer or negative value (`null` excluded), `lite` accepts it and the rewrite corrects it; `strict` and above reject it.
+
+A mistyped `title`, and a `null` `$id` or `pattern`, are also accepted by `lite` and dropped by `Canonical`; `strict` and above reject them. Other non-string `$id` / `pattern` values are still rejected from `lite`. A non-string `description` (including `null`) is still rejected from `lite`.
 
 ### 2.2 References that cannot be resolved
 
@@ -185,6 +188,8 @@ Contradictions count when a branch uses `$ref` too: a parent `"type":"string"` o
 | Case | Input | Rewrite result |
 | --- | --- | --- |
 | Uses an unsupported keyword | `{"type":"string","format":"uuid"}` | `{"type":"string"}` — only that keyword is removed |
+| `title` has the wrong type | `{"type":"string","title":null}` | `{"type":"string"}` — only that keyword is removed |
+| `$id` / `pattern` is `null` | `{"type":"string","pattern":null}` | `{"type":"string"}` — only that keyword is removed |
 | `$defs` / `$id` not at the root | `$defs` inside a subschema | The keyword is removed, everything else kept |
 | Duplicates in a `type` array or in `required` | `{"type":["string","string"]}` | `{"type":["string"]}` |
 | Negative bound value | `{"type":"string","minLength":-1}` | `{"type":"string","minLength":0}` |
