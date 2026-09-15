@@ -27,6 +27,14 @@
 {"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"maxItems\": -5\n\t\t\t}","expect":"maxItems must be non-negative","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": \"5\"\n\t\t\t}","expect":"minItems must be an integer","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"maxItems\": \"10\"\n\t\t\t}","expect":"maxItems must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"minItems\": null\n\t\t\t}","expect":"minItems must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": {\"type\": \"string\"},\n\t\t\t\t\"maxItems\": null\n\t\t\t}","expect":"maxItems must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minLength\": null\n\t\t\t}","expect":"minLength must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"maxLength\": null\n\t\t\t}","expect":"maxLength must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"minimum\": null\n\t\t\t}","expect":"minimum must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"minimum\": null\n\t\t\t}","expect":"minimum must be a number","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"integer\",\n\t\t\t\t\"maximum\": null\n\t\t\t}","expect":"maximum must be an integer","unmarshal":false}
+{"schema":"{\n\t\t\t\t\"type\": \"number\",\n\t\t\t\t\"maximum\": null\n\t\t\t}","expect":"maximum must be a number","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": 123,\n\t\t\t\t\"minLength\": 1,\n\t\t\t\t\"maxLength\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"array\",\n\t\t\t\t\"items\": 123,\n\t\t\t\t\"minimum\": 1,\n\t\t\t\t\"maximum\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}
 {"schema":"{\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"minItems\": 1,\n\t\t\t\t\"maxItems\": 10\n\t\t\t}","expect":"invalid keywords:","unmarshal":false}

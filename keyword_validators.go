@@ -389,12 +389,22 @@ func (v *keywordValidators) ValidateRef(value any, context *validationContext, p
 	return nil
 }
 
-func (v *keywordValidators) ValidateDescription(value any, context *validationContext, path schemaPath) error {
-	_, ok := value.(string)
-	if !ok {
-		return context.RaiseErrorWithSimplify("description must be a string", path, SimplifyRemoveDescription)
+func requireStringKeyword(value any, context *validationContext, path schemaPath, keyword string, simplify SimplifyFunc) error {
+	if _, ok := value.(string); !ok {
+		return context.RaiseErrorWithSimplify(keyword+" must be a string", path, simplify)
 	}
 	return nil
+}
+
+func (v *keywordValidators) ValidateDescription(value any, context *validationContext, path schemaPath) error {
+	return requireStringKeyword(value, context, path, Description, SimplifyRemoveDescription)
+}
+
+func (v *keywordValidators) ValidateTitle(value any, context *validationContext, path schemaPath) error {
+	if v.config.IsLite() {
+		return nil
+	}
+	return requireStringKeyword(value, context, path, Title, SimplifyRemoveTitle)
 }
 
 func (v *keywordValidators) ValidateAnyOf(value any, context *validationContext, path schemaPath) error {
@@ -531,38 +541,85 @@ func (v *keywordValidators) validateNoSlashInKeys(value any, context *validation
 }
 
 func (v *keywordValidators) ValidateID(value any, context *validationContext, path schemaPath) error {
-	if value == nil {
+	if value == nil && v.config.IsLite() {
 		return nil
 	}
-
-	_, ok := value.(string)
-	if !ok {
-		return context.RaiseErrorWithSimplify("$id must be a string", path, SimplifyRemoveID)
-	}
-
-	// if idStr == "" {
-	// 	return context.RaiseError("$id cannot be empty", path)
-	// }
-
-	return nil
+	return requireStringKeyword(value, context, path, Id, SimplifyRemoveID)
 }
 
 func (v *keywordValidators) ValidatePattern(value any, context *validationContext, path schemaPath) error {
-	if value == nil {
+	if value == nil && v.config.IsLite() {
 		return nil
 	}
-
-	_, ok := value.(string)
-	if !ok {
-		return context.RaiseErrorWithSimplify("pattern must be a string", path, SimplifyRemovePattern)
-	}
-
-	return nil
+	return requireStringKeyword(value, context, path, Pattern, SimplifyRemovePattern)
 }
 
 func (v *keywordValidators) ValidateDefault(value any, context *validationContext, path schemaPath) error {
 	// Default keyword validation is currently not implemented
 	return nil
+}
+
+type boundValueKind int
+
+const (
+	boundNonNegativeInteger boundValueKind = iota
+	boundInteger
+	boundNumber
+)
+
+func (k boundValueKind) typeName() string {
+	if k == boundNumber {
+		return "a number"
+	}
+	return "an integer"
+}
+
+// validateBoundValue checks one numeric bound keyword. JSON null is a
+// misspelled value and is rejected at lite; a string, a negative number, or a
+// non-integer is left for strict and above, matching the previous behaviour.
+func (v *keywordValidators) validateBoundValue(
+	value any,
+	present bool,
+	context *validationContext,
+	path schemaPath,
+	keyword string,
+	kind boundValueKind,
+) error {
+	if !present {
+		return nil
+	}
+
+	typeMsg := fmt.Sprintf("%s must be %s", keyword, kind.typeName())
+	if value == nil {
+		return context.RaiseErrorWithSimplify(typeMsg, path, simplifyRemoveKeysAtNode(keyword))
+	}
+	if v.config.IsLite() {
+		return nil
+	}
+
+	val, ok := value.(float64)
+	if !ok {
+		return context.RaiseErrorWithSimplify(typeMsg, path, simplifyRemoveKeysAtNode(keyword))
+	}
+	if kind == boundNonNegativeInteger && val < 0 {
+		return context.RaiseErrorWithSimplify(keyword+" must be non-negative", path, SimplifyNegativeVal)
+	}
+	if kind == boundNumber {
+		return v.utils.IsValidNumber(val, context, path)
+	}
+	return v.utils.IsValidInteger(val, context, path)
+}
+
+func bothBoundsPresent(minVal any, hasMin bool, maxVal any, hasMax bool) (float64, float64, bool) {
+	if !hasMin || !hasMax || minVal == nil || maxVal == nil {
+		return 0, 0, false
+	}
+	minNum, minOK := minVal.(float64)
+	maxNum, maxOK := maxVal.(float64)
+	if !minOK || !maxOK {
+		return 0, 0, false
+	}
+	return minNum, maxNum, true
 }
 
 func (v *keywordValidators) ValidateLengthRange(value any, context *validationContext, path schemaPath) error {
@@ -574,41 +631,15 @@ func (v *keywordValidators) ValidateLengthRange(value any, context *validationCo
 	minLength, hasMinLength := schema[MinLength]
 	maxLength, hasMaxLength := schema[MaxLength]
 
-	// Check type and non-negative for minLength if present
-	if hasMinLength && minLength != nil {
-		switch val := minLength.(type) {
-		case float64:
-			if val < 0 {
-				return context.RaiseErrorWithSimplify("minLength must be non-negative", path, SimplifyNegativeVal)
-			}
-			if err := v.utils.IsValidInteger(val, context, path); err != nil {
-				return err
-			}
-		default:
-			return context.RaiseErrorWithSimplify("minLength must be an integer", path, SimplifyRemoveConstraints)
-		}
+	if err := v.validateBoundValue(minLength, hasMinLength, context, path, MinLength, boundNonNegativeInteger); err != nil {
+		return err
+	}
+	if err := v.validateBoundValue(maxLength, hasMaxLength, context, path, MaxLength, boundNonNegativeInteger); err != nil {
+		return err
 	}
 
-	// Check type and non-negative for maxLength if present
-	if hasMaxLength && maxLength != nil {
-		switch val := maxLength.(type) {
-		case float64:
-			if val < 0 {
-				return context.RaiseErrorWithSimplify("maxLength must be non-negative", path, SimplifyNegativeVal)
-			}
-			if err := v.utils.IsValidInteger(val, context, path); err != nil {
-				return err
-			}
-		default:
-			return context.RaiseErrorWithSimplify("maxLength must be an integer", path, SimplifyRemoveConstraints)
-		}
-	}
-
-	// Only check range if both are present
-	if hasMinLength && hasMaxLength && minLength != nil && maxLength != nil {
-		minVal := minLength.(float64)
-		maxVal := maxLength.(float64)
-		if minVal > maxVal {
+	if !v.config.IsLite() {
+		if minVal, maxVal, ok := bothBoundsPresent(minLength, hasMinLength, maxLength, hasMaxLength); ok && minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minLength (%v) cannot be greater than maxLength (%v)", minLength, maxLength),
 				path.Append(MinLength), SimplifyDegradeEnclosingSchema,
@@ -633,70 +664,30 @@ func (v *keywordValidators) ValidateNumericRange(value any, context *validationC
 		return nil
 	}
 
-	isInteger := false
+	kind := boundNumber
 	switch t := schemaType.(type) {
 	case string:
 		if t == Integer {
-			isInteger = true
+			kind = boundInteger
 		}
 	case SchemaList:
-		for _, t := range t {
-			if t == Integer {
-				isInteger = true
+		for _, item := range t {
+			if item == Integer {
+				kind = boundInteger
 				break
 			}
 		}
 	}
 
-	if hasMinimum && minimum != nil {
-		if isInteger {
-			switch val := minimum.(type) {
-			case float64:
-				if err := v.utils.IsValidInteger(val, context, path); err != nil {
-					return err
-				}
-			default:
-				return context.RaiseErrorWithSimplify("minimum must be an integer", path, SimplifyDefault)
-			}
-		} else {
-			switch val := minimum.(type) {
-			case float64:
-				if err := v.utils.IsValidNumber(val, context, path); err != nil {
-					return err
-				}
-			default:
-				return context.RaiseErrorWithSimplify("minimum must be a number", path, SimplifyDefault)
-			}
-		}
+	if err := v.validateBoundValue(minimum, hasMinimum, context, path, Minimum, kind); err != nil {
+		return err
+	}
+	if err := v.validateBoundValue(maximum, hasMaximum, context, path, Maximum, kind); err != nil {
+		return err
 	}
 
-	if hasMaximum && maximum != nil {
-		if isInteger {
-			switch val := maximum.(type) {
-			case float64:
-				if err := v.utils.IsValidInteger(val, context, path); err != nil {
-					return err
-				}
-			default:
-				return context.RaiseErrorWithSimplify("maximum must be an integer", path, SimplifyDefault)
-			}
-		} else {
-			switch val := maximum.(type) {
-			case float64:
-				if err := v.utils.IsValidNumber(val, context, path); err != nil {
-					return err
-				}
-			default:
-				return context.RaiseErrorWithSimplify("maximum must be a number", path, SimplifyDefault)
-			}
-		}
-	}
-
-	// Only validate minimum <= maximum if both values are provided
-	if hasMinimum && hasMaximum && minimum != nil && maximum != nil {
-		minVal := minimum.(float64)
-		maxVal := maximum.(float64)
-		if minVal > maxVal {
+	if !v.config.IsLite() {
+		if minVal, maxVal, ok := bothBoundsPresent(minimum, hasMinimum, maximum, hasMaximum); ok && minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minimum (%v) cannot be greater than maximum (%v)", minimum, maximum),
 				path, SimplifyRemoveParentSchema,
@@ -716,41 +707,15 @@ func (v *keywordValidators) ValidateItemsRange(value any, context *validationCon
 	minItems, hasMinItems := schema[MinItems]
 	maxItems, hasMaxItems := schema[MaxItems]
 
-	// Check type and non-negative for minItems if present
-	if hasMinItems && minItems != nil {
-		switch val := minItems.(type) {
-		case float64:
-			if val < 0 {
-				return context.RaiseErrorWithSimplify("minItems must be non-negative", path, SimplifyNegativeVal)
-			}
-			if err := v.utils.IsValidInteger(val, context, path); err != nil {
-				return err
-			}
-		default:
-			return context.RaiseErrorWithSimplify("minItems must be an integer", path, SimplifyDefault)
-		}
+	if err := v.validateBoundValue(minItems, hasMinItems, context, path, MinItems, boundNonNegativeInteger); err != nil {
+		return err
+	}
+	if err := v.validateBoundValue(maxItems, hasMaxItems, context, path, MaxItems, boundNonNegativeInteger); err != nil {
+		return err
 	}
 
-	// Check type and non-negative for maxItems if present
-	if hasMaxItems && maxItems != nil {
-		switch val := maxItems.(type) {
-		case float64:
-			if val < 0 {
-				return context.RaiseErrorWithSimplify("maxItems must be non-negative", path, SimplifyNegativeVal)
-			}
-			if err := v.utils.IsValidInteger(val, context, path); err != nil {
-				return err
-			}
-		default:
-			return context.RaiseErrorWithSimplify("maxItems must be an integer", path, SimplifyDefault)
-		}
-	}
-
-	// Only check range if both are present
-	if hasMinItems && hasMaxItems && minItems != nil && maxItems != nil {
-		minVal := minItems.(float64)
-		maxVal := maxItems.(float64)
-		if minVal > maxVal {
+	if !v.config.IsLite() {
+		if minVal, maxVal, ok := bothBoundsPresent(minItems, hasMinItems, maxItems, hasMaxItems); ok && minVal > maxVal {
 			return context.RaiseErrorWithSimplify(
 				fmt.Sprintf("minItems (%v) cannot be greater than maxItems (%v)", minItems, maxItems),
 				path.Append(MinItems), SimplifyDegradeEnclosingSchema,

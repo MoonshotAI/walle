@@ -41,15 +41,18 @@
 | `anyOf` 不是数组 | `anyOf must be an array` |
 | `anyOf` 是空数组 | `anyOf must have 1-500 items` |
 | `$ref` 不是字符串 | `$ref must be a string` |
-| `pattern` 不是字符串 | `pattern must be a string` |
+| `pattern` 不是字符串（`null` 除外） | `pattern must be a string` |
 | `description` 不是字符串 | `description must be a string` |
 | `additionalProperties` 不是布尔值或对象 | `additionalProperties must be a boolean or an object` |
 | `$defs` 不是对象 | `$defs must be an object` |
-| `$id` 不是字符串 | `$id must be a string` |
+| `$id` 不是字符串（`null` 除外） | `$id must be a string` |
+| 数值边界关键字的值是 `null` | `minItems must be an integer` / `minimum must be a number` 等 |
 
 规模上限同样在 `lite` 生效：整份 schema 120000 字节、嵌套 30 层、所有对象累计 3000 个属性键、单个 `enum` 1000 项、`anyOf` 500 个分支。
 
-数值边界关键字（`minLength` `maxLength` `minimum` `maximum` `minItems` `maxItems`）的值不是整数或为负数时，`lite` 放行并在改写时纠正，`strict` 及以上才拒绝。
+数值边界关键字（`minLength` `maxLength` `minimum` `maximum` `minItems` `maxItems`）的值不是整数或为负数时（`null` 除外），`lite` 放行并在改写时纠正，`strict` 及以上才拒绝。
+
+`title` 类型不对，以及 `$id` / `pattern` 为 `null` 时，`lite` 同样放行，`Canonical` 删掉该关键字，`strict` 及以上才拒绝。`pattern` / `$id` 的其它非字符串值仍从 `lite` 拒绝。`description` 不是字符串（含 `null`）仍从 `lite` 拒绝。
 
 ### 2.2 引用无法解析
 
@@ -185,6 +188,8 @@
 | 情形 | 输入 | 改写结果 |
 | --- | --- | --- |
 | 用了不支持的关键字 | `{"type":"string","format":"uuid"}` | `{"type":"string"}`，只删该关键字 |
+| `title` 类型不对 | `{"type":"string","title":null}` | `{"type":"string"}`，只删该关键字 |
+| `$id` / `pattern` 为 `null` | `{"type":"string","pattern":null}` | `{"type":"string"}`，只删该关键字 |
 | `$defs` / `$id` 没写在根层 | 子 schema 里带 `$defs` | 删掉该关键字，其余保留 |
 | `type` 数组或 `required` 里有重复项 | `{"type":["string","string"]}` | `{"type":["string"]}` |
 | 边界值为负 | `{"type":"string","minLength":-1}` | `{"type":"string","minLength":0}` |

@@ -1777,6 +1777,24 @@ func TestCanonicalDegradesLocallyNotWholeSchema(t *testing.T) {
 			in:   `{"type":"object","properties":{"":{"type":"string"},"a":{"type":"number"}}}`,
 			keep: []string{`"":{"type":"string"}`, `"a":{"type":"number"}`},
 		},
+		{
+			name: "title null is dropped",
+			in:   `{"type":"string","title":null}`,
+			keep: []string{`"type":"string"`},
+			gone: []string{`"title"`},
+		},
+		{
+			name: "$id null is dropped",
+			in:   `{"type":"object","$id":null,"properties":{"a":{"type":"string"}}}`,
+			keep: []string{`"type":"object"`, `"type":"string"`},
+			gone: []string{`"$id"`},
+		},
+		{
+			name: "pattern null is dropped",
+			in:   `{"type":"string","pattern":null}`,
+			keep: []string{`"type":"string"`},
+			gone: []string{`"pattern"`},
+		},
 	}
 
 	for _, tc := range cases {

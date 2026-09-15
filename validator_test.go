@@ -868,6 +868,266 @@ func TestBoundConflictsRejectedFromStrictUpwards(t *testing.T) {
 	}
 }
 
+// title type errors and $id / pattern JSON null pass lite (least user
+// disruption) and are dropped by Canonical. Other non-string $id / pattern
+// values stay rejected from lite, matching the original behaviour.
+func TestStringKeywordsRejectWrongTypeAtEveryLevel(t *testing.T) {
+	cases := []struct {
+		name        string
+		schema      string
+		err         string
+		gone        string
+		keep        []string
+		liteRejects bool
+	}{
+		{
+			name:   "title null",
+			schema: `{"type":"string","title":null}`,
+			err:    "title must be a string",
+			gone:   `"title"`,
+			keep:   []string{`"type":"string"`},
+		},
+		{
+			name:   "title number",
+			schema: `{"type":"string","title":1}`,
+			err:    "title must be a string",
+			gone:   `"title"`,
+			keep:   []string{`"type":"string"`},
+		},
+		{
+			name:   "title object",
+			schema: `{"type":"object","title":{},"properties":{"a":{"type":"string"}}}`,
+			err:    "title must be a string",
+			gone:   `"title"`,
+			keep:   []string{`"type":"object"`, `"type":"string"`},
+		},
+		{
+			name:   "$id null",
+			schema: `{"type":"string","$id":null}`,
+			err:    "$id must be a string",
+			gone:   `"$id"`,
+			keep:   []string{`"type":"string"`},
+		},
+		{
+			name:   "pattern null",
+			schema: `{"type":"string","pattern":null}`,
+			err:    "pattern must be a string",
+			gone:   `"pattern"`,
+			keep:   []string{`"type":"string"`},
+		},
+		{
+			name:        "$id number",
+			schema:      `{"type":"string","$id":123}`,
+			err:         "$id must be a string",
+			gone:        `"$id"`,
+			keep:        []string{`"type":"string"`},
+			liteRejects: true,
+		},
+		{
+			name:        "pattern number",
+			schema:      `{"type":"string","pattern":1}`,
+			err:         "pattern must be a string",
+			gone:        `"pattern"`,
+			keep:        []string{`"type":"string"`},
+			liteRejects: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			liteErr := newSchemaValidator(WithValidateLevel(ValidateLevelLite)).Validate(tc.schema)
+			if tc.liteRejects {
+				if liteErr == nil {
+					t.Errorf("lite should reject the schema")
+				} else if !strings.Contains(liteErr.Error(), tc.err) {
+					t.Errorf("lite: expected %q, got %v", tc.err, liteErr)
+				}
+			} else if liteErr != nil {
+				t.Errorf("lite should still accept the schema, got %v", liteErr)
+			}
+			for _, level := range []ValidateLevel{ValidateLevelStrict, ValidateLevelUltra} {
+				err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.schema)
+				if err == nil {
+					t.Errorf("%s should reject the schema", level)
+					continue
+				}
+				if !strings.Contains(err.Error(), tc.err) {
+					t.Errorf("%s: expected %q, got %v", level, tc.err, err)
+				}
+			}
+
+			schema, err := ParseSchema(tc.schema)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			result, _ := schema.Canonical()
+			if result == "{}" {
+				t.Fatalf("schema collapsed to {}; expected only the bad keyword to be dropped")
+			}
+			if strings.Contains(result, tc.gone) {
+				t.Errorf("expected %s to be dropped, got %s", tc.gone, result)
+			}
+			for _, frag := range tc.keep {
+				if !strings.Contains(result, frag) {
+					t.Errorf("expected %s to survive, got %s", frag, result)
+				}
+			}
+		})
+	}
+}
+
+// JSON null on a bound keyword is a misspelled value, so lite rejects it.
+// A string, a negative number, or a non-integer still pass lite, as before.
+func TestNullBoundsRejectedFromLiteUpwards(t *testing.T) {
+	cases := []struct {
+		name        string
+		schema      string
+		err         string
+		gone        string
+		keep        []string
+		liteRejects bool
+	}{
+		{
+			name:        "minItems null",
+			schema:      `{"type":"array","items":{"type":"string"},"minItems":null}`,
+			err:         "minItems must be an integer",
+			gone:        `"minItems"`,
+			keep:        []string{`"type":"array"`, `"type":"string"`},
+			liteRejects: true,
+		},
+		{
+			name:        "maxItems null",
+			schema:      `{"type":"array","items":{"type":"string"},"maxItems":null}`,
+			err:         "maxItems must be an integer",
+			gone:        `"maxItems"`,
+			keep:        []string{`"type":"array"`},
+			liteRejects: true,
+		},
+		{
+			name:        "minLength null",
+			schema:      `{"type":"string","minLength":null}`,
+			err:         "minLength must be an integer",
+			gone:        `"minLength"`,
+			keep:        []string{`"type":"string"`},
+			liteRejects: true,
+		},
+		{
+			name:        "maxLength null",
+			schema:      `{"type":"string","maxLength":null}`,
+			err:         "maxLength must be an integer",
+			gone:        `"maxLength"`,
+			keep:        []string{`"type":"string"`},
+			liteRejects: true,
+		},
+		{
+			name:        "minimum null",
+			schema:      `{"type":"number","minimum":null}`,
+			err:         "minimum must be a number",
+			gone:        `"minimum"`,
+			keep:        []string{`"type":"number"`},
+			liteRejects: true,
+		},
+		{
+			name:        "maximum null",
+			schema:      `{"type":"number","maximum":null}`,
+			err:         "maximum must be a number",
+			gone:        `"maximum"`,
+			keep:        []string{`"type":"number"`},
+			liteRejects: true,
+		},
+		{
+			name:        "integer minimum null",
+			schema:      `{"type":"integer","minimum":null}`,
+			err:         "minimum must be an integer",
+			gone:        `"minimum"`,
+			keep:        []string{`"type":"integer"`},
+			liteRejects: true,
+		},
+		{
+			name:        "integer maximum null",
+			schema:      `{"type":"integer","maximum":null}`,
+			err:         "maximum must be an integer",
+			gone:        `"maximum"`,
+			keep:        []string{`"type":"integer"`},
+			liteRejects: true,
+		},
+		{
+			name:        "nested minItems null under items",
+			schema:      `{"type":"array","items":{"type":"array","items":{"type":"string"},"minItems":null}}`,
+			err:         "minItems must be an integer",
+			gone:        `"minItems"`,
+			keep:        []string{`"type":"array"`, `"type":"string"`},
+			liteRejects: true,
+		},
+		{
+			name:   "minimum string",
+			schema: `{"type":"number","minimum":"5"}`,
+			err:    "minimum must be a number",
+			gone:   `"minimum"`,
+			keep:   []string{`"type":"number"`},
+		},
+		{
+			name:   "nested minLength string",
+			schema: `{"type":"object","properties":{"a":{"type":"string","minLength":"5"}}}`,
+			err:    "minLength must be an integer",
+			gone:   `"minLength"`,
+			keep:   []string{`"type":"object"`, `"type":"string"`},
+		},
+		{
+			name:   "minItems string",
+			schema: `{"type":"array","items":{"type":"string"},"minItems":"5"}`,
+			err:    "minItems must be an integer",
+			gone:   `"minItems"`,
+			keep:   []string{`"type":"array"`, `"type":"string"`},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := newSchemaValidator(WithValidateLevel(ValidateLevelLoose)).Validate(tc.schema); err != nil {
+				t.Errorf("loose should still accept the schema, got %v", err)
+			}
+			liteErr := newSchemaValidator(WithValidateLevel(ValidateLevelLite)).Validate(tc.schema)
+			if tc.liteRejects {
+				if liteErr == nil {
+					t.Errorf("lite should reject the schema")
+				} else if !strings.Contains(liteErr.Error(), tc.err) {
+					t.Errorf("lite: expected %q, got %v", tc.err, liteErr)
+				}
+			} else if liteErr != nil {
+				t.Errorf("lite should still accept the schema, got %v", liteErr)
+			}
+			for _, level := range []ValidateLevel{ValidateLevelStrict, ValidateLevelUltra} {
+				err := newSchemaValidator(WithValidateLevel(level)).Validate(tc.schema)
+				if err == nil {
+					t.Errorf("%s should reject the schema", level)
+					continue
+				}
+				if !strings.Contains(err.Error(), tc.err) {
+					t.Errorf("%s: expected %q, got %v", level, tc.err, err)
+				}
+			}
+
+			schema, err := ParseSchema(tc.schema)
+			if err != nil {
+				t.Fatalf("failed to parse schema: %v", err)
+			}
+			result, _ := schema.Canonical()
+			if result == "{}" {
+				t.Fatalf("schema collapsed to {}; expected only the null bound to be dropped")
+			}
+			if strings.Contains(result, tc.gone) {
+				t.Errorf("expected %s to be dropped, got %s", tc.gone, result)
+			}
+			for _, frag := range tc.keep {
+				if !strings.Contains(result, frag) {
+					t.Errorf("expected %s to survive, got %s", frag, result)
+				}
+			}
+		})
+	}
+}
+
 // Bounds that make sense together must survive untouched at every level.
 func TestConsistentBoundsAreUntouched(t *testing.T) {
 	const schema = `{"type":"object","properties":{"a":{"type":"string","minLength":2,"maxLength":10}}}`
