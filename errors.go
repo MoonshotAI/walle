@@ -9,6 +9,7 @@ type SchemaError struct {
 	Path         string       `json:"path,omitempty"`
 	Message      string       `json:"message,omitempty"`
 	SimplifyFunc SimplifyFunc `json:"-"`
+	pathParts    []string
 }
 
 func (e *SchemaError) Error() string {
