@@ -242,10 +242,12 @@ func (v *keywordValidators) ValidateEnum(value any, context *validationContext, 
 	if v.config.IsUltra() || v.config.IsTest() {
 		for _, val := range enum {
 			matchesAnyType := false
+			var typeErr error
 			for _, t := range typeList {
 				matches, err := v.utils.IsTypeMatch(val, t, context, path)
 				if err != nil {
-					return err
+					typeErr = err
+					continue
 				}
 				if matches {
 					matchesAnyType = true
@@ -254,9 +256,12 @@ func (v *keywordValidators) ValidateEnum(value any, context *validationContext, 
 			}
 
 			if !matchesAnyType {
+				message := fmt.Sprintf("enum value (%v) does not match any type in %v", val, typeList)
+				if schemaErr, ok := typeErr.(*SchemaError); ok {
+					message = schemaErr.Message
+				}
 				return context.RaiseErrorWithSimplify(
-					fmt.Sprintf("enum value (%v) does not match any type in %v", val, typeList),
-					path, v.simplifyIntersectEnumWithType(typeList),
+					message, path, v.simplifyIntersectEnumWithType(typeList),
 				)
 			}
 		}
