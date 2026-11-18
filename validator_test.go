@@ -696,6 +696,25 @@ func TestUltraUnsupportedKeywordsErrorOrderIsStable(t *testing.T) {
 	}
 }
 
+func TestLiteAcceptsUniqueItems(t *testing.T) {
+	must := require.New(t)
+	const schema = `{
+		"type": "object",
+		"additionalProperties": false,
+		"properties": {
+			"tags": {
+				"type": "array",
+				"items": {"type": "string"},
+				"uniqueItems": true
+			}
+		},
+		"required": ["tags"]
+	}`
+
+	validator := newSchemaValidator(WithValidateLevel(ValidateLevelLite))
+	must.NoError(validator.Validate(schema), "lite should accept and ignore uniqueItems")
+}
+
 func TestLiteAllowsMultipleTypesWithItems(t *testing.T) {
 	must := require.New(t)
 	schema := `{"additionalProperties": false, "properties": {"files": {"description": "List of files to read; request related files together when allowed", "items": {"additionalProperties": false, "properties": {"line_ranges": {"description": "Optional line ranges to read. Each range is a [start, end] tuple with 1-based inclusive line numbers. Use multiple ranges for non-contiguous sections.", "items": {"items": {"type": "integer"}, "maxItems": 2, "minItems": 2, "type": "array"}, "type": ["array", "null"]}, "path": {"description": "Path to the file to read, relative to the workspace", "type": "string"}}, "required": ["path", "line_ranges"], "type": "object"}, "minItems": 1, "type": "array"}}, "required": ["files"], "type": "object"}`
