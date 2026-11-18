@@ -672,6 +672,9 @@ func (v *schemaValidator) CanonicalWithMaxAttempts(schema Schema, maxAttempts in
 
 		if schemaErr, ok := err.(*SchemaError); ok && schemaErr.SimplifyFunc != nil {
 			pathObj := newSchemaPath(schemaErr.Path)
+			if len(schemaErr.pathParts) > 0 {
+				pathObj = newSchemaPathFromParts(schemaErr.pathParts)
+			}
 			currentSchema = schemaErr.SimplifyFunc(currentSchema, pathObj)
 		} else {
 			return "{}", rawErr

@@ -17,5 +17,7 @@ func (c *validationContext) RaiseError(message string, path schemaPath) error {
 }
 
 func (c *validationContext) RaiseErrorWithSimplify(message string, path schemaPath, simplifyFunc SimplifyFunc) error {
-	return NewSchemaError(message, path.String(), simplifyFunc)
+	err := NewSchemaError(message, path.String(), simplifyFunc).(*SchemaError)
+	err.pathParts = append([]string(nil), path.Parts...)
+	return err
 }

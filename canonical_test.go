@@ -1751,6 +1751,12 @@ func TestCanonicalDegradesLocallyNotWholeSchema(t *testing.T) {
 			gone: []string{"format"},
 		},
 		{
+			name: "invalid bound on a dotted property name",
+			in:   `{"type":"object","properties":{"a.b":{"type":"string","minLength":-1}}}`,
+			keep: []string{`"a.b":{"minLength":0,"type":"string"}`},
+			gone: []string{`"minLength":-1`},
+		},
+		{
 			name: "unsupported keyword at root",
 			in:   `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"allOf":[{"title":"x"}]}`,
 			keep: []string{`"required":["a"]`, `"type":"string"`},
