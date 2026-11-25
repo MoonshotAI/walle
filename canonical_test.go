@@ -1109,6 +1109,175 @@ func TestCanonicalWithAutoFix(t *testing.T) {
 				"type": "string"
 			}`,
 		},
+		{
+			name: "enum_without_type_in_anyOf_branch",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"size": {
+						"anyOf": [
+							{"enum": ["1024x1024", "1536x1024", "auto"]},
+							{"pattern": "^[1-9][0-9]*x[1-9][0-9]*$"}
+						]
+					}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"size": {
+						"anyOf": [
+							{"type": "string", "enum": ["1024x1024", "1536x1024", "auto"]},
+							{"type": "string", "pattern": "^[1-9][0-9]*x[1-9][0-9]*$"}
+						]
+					}
+				}
+			}`,
+		},
+		{
+			name: "pattern_without_type",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"size": {"pattern": "^[1-9][0-9]*x[1-9][0-9]*$"}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"size": {"type": "string", "pattern": "^[1-9][0-9]*x[1-9][0-9]*$"}
+				}
+			}`,
+		},
+		{
+			name:             "enum_without_type_at_root",
+			invalidSchema:    `{"enum": ["a", "b"]}`,
+			simplifiedSchema: `{"type": "string", "enum": ["a", "b"]}`,
+		},
+		{
+			name: "enum_without_type_number_values",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"n": {"enum": [1, 2.5]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"n": {"type": "number", "enum": [1, 2.5]}
+				}
+			}`,
+		},
+		{
+			name: "enum_without_type_boolean_values",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"flag": {"enum": [true, false]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"flag": {"type": "boolean", "enum": [true, false]}
+				}
+			}`,
+		},
+		{
+			name: "enum_without_type_mixed_values",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {"enum": ["a", 1]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {}
+				}
+			}`,
+		},
+		{
+			name: "enum_without_type_non_scalar_values",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {"enum": [{"a": 1}]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {}
+				}
+			}`,
+		},
+		{
+			name: "enum_without_type_null_values",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {"enum": [null]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"v": {"type": "null", "enum": [null]}
+				}
+			}`,
+		},
+		{
+			name: "enum_without_type_in_defs_referenced",
+			invalidSchema: `{
+				"type": "object",
+				"$defs": {"S": {"enum": ["a", "b"]}},
+				"properties": {
+					"v": {"$ref": "#/$defs/S"}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"$defs": {"S": {"type": "string", "enum": ["a", "b"]}},
+				"properties": {
+					"v": {"$ref": "#/$defs/S"}
+				}
+			}`,
+		},
+		{
+			name: "default_value_is_not_rewritten",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "default": {"pattern": "*.go"}}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "default": {"pattern": "*.go"}}
+				}
+			}`,
+		},
+		{
+			name: "properties_table_is_not_a_schema",
+			invalidSchema: `{
+				"type": "object",
+				"properties": {
+					"pattern": {"type": "string"},
+					"enum": {"enum": [1, 2]}
+				}
+			}`,
+			simplifiedSchema: `{
+				"type": "object",
+				"properties": {
+					"pattern": {"type": "string"},
+					"enum": {"type": "number", "enum": [1, 2]}
+				}
+			}`,
+		},
 	}
 
 	for _, tt := range tests {

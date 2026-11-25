@@ -17,7 +17,7 @@
 
 | Categories/错误分类 | rules | details |
 | --- | --- | --- |
-| Structural Errors/结构错误 | subschema需要显式指定type字段。与 anyOf 或 $ref 同级时 type 合法（2020-12 下同级关键字按 AND 生效），lite 放行：与 anyOf 同级时 Canonical 把 type 分发进每个分支，与 $ref 同级时折叠进被引用的 schema。与被引用 schema 的 type 交集为空时属恒假，lite 仍放行但 Canonical 把该子 schema 退化为 {}，strict 及以上拒绝 | 两种例外:<br>情况1：完整schema == {} 代表ANY<br>情况2："additionalProperties" : {} 代表ANY<br>注意：非上面两种情况暂时不支持 {} 自动推导为ANY，比如<br><br><pre><code class="language-json">"properties": {&#10;  "key1": {},&#10;  "key2": {}&#10;}</code></pre> |
+| Structural Errors/结构错误 | subschema 应显式指定 type 字段，但仅缺 type 这一点在各级别都不再被拒绝（enum/pattern 自身的取值类型、项数与长度上限等规则照常执行）。Canonical 会对 enum（值同属一种标量类型时）和 pattern 节点推断补全，无法推断的 enum 节点退化为 {}。与 anyOf 或 $ref 同级时 type 合法（2020-12 下同级关键字按 AND 生效），lite 放行：与 anyOf 同级时 Canonical 把 type 分发进每个分支，与 $ref 同级时折叠进被引用的 schema。与被引用 schema 的 type 交集为空时属恒假，lite 仍放行但 Canonical 把该子 schema 退化为 {}，strict 及以上拒绝 | 两种例外:<br>情况1：完整schema == {} 代表ANY<br>情况2："additionalProperties" : {} 代表ANY<br>注意：非上面两种情况暂时不支持 {} 自动推导为ANY，比如<br><br><pre><code class="language-json">"properties": {&#10;  "key1": {},&#10;  "key2": {}&#10;}</code></pre> |
 |  | 只支持null/boolean/object/array/number/integer/string 这7种types, root schema必须是dict |  |
 |  | 只支持MFJS约定的范围的keywords | 分为两种情况：非法的keyword、合法但是MFJS不支持的keyword |
 |  | 各种keywords的位置要符合json schema规范 | object类型中只允许type/properties/required/additionalProperties/anyOf/$ref 这些keywords |
@@ -29,7 +29,7 @@
 |  | anyOf 元素个数>=1, <= 500（默认，可用 WithMaxAnyOfItems 调整） |  |
 |  | $defs/$id 只能定义在root level |  |
 |  | $ref 需要指向本schema自身或者本schema的subschema 的合法$defs，不支持remote/跨文件/url | 指向自身: "$ref": "#" |
-|  | $ref/$defs 需要有合理终止条件，禁止infinite recursive loop | 判据是能否构造有限实例：可选属性成环、数组成环且未设 minItems 都可终止；必填属性成环、minItems >= 1 的数组成环则拒绝 |
+|  | $ref/$defs 需要有合理终止条件，禁止infinite recursive loop | 判据是能否构造有限实例：可选属性成环、数组成环且未设 minItems 都可终止；必填属性成环、minItems >= 1 的数组成环则拒绝。无 type 的节点按关键字推断结构：带 properties/required/additionalProperties 按 object、带 items/minItems/maxItems 按 array 同样检查；只带 enum/pattern 等标量约束的节点判为可终止 |
 |  | $ref的位置要合法 | 可以存在于："properties", "defs", "additionalProperties", "anyOf", "items", "root" 相关位置处 |
 |  | Array: Limitations on enum size | 单个 enum 默认最多 1000 项。另有一条字符串总长限制（上限 75000 字符），但它只在 enum 项数超过 2500 时才检查——该阈值高于 1000 的项数上限，因此默认配置下不会触发，只有调用方用 WithMaxEnumItems 放宽项数后才生效 |
 |  | Array:  "items"可以不定义，如果定义则内容不能为空 |  |

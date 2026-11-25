@@ -1539,3 +1539,136 @@ func TestRefTerminationFailsClosedBeyondStepBudget(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateEnumAndPatternWithoutType(t *testing.T) {
+	schemas := []string{
+		`{"type":"object","properties":{"size":{"anyOf":[{"enum":["1024x1024","auto"]},{"pattern":"^[1-9][0-9]*x[1-9][0-9]*$"}]}}}`,
+		`{"enum":["a","b"]}`,
+		`{"enum":[1,2.5]}`,
+		`{"enum":[true,false]}`,
+		`{"enum":["a",1]}`,
+		`{"pattern":"^a+$"}`,
+		`{"type":"object","$defs":{"E":{"enum":["a","b"]}},"properties":{"v":{"$ref":"#/$defs/E"}},"required":["v"]}`,
+		`{"type":"object","$defs":{"P":{"pattern":"^a$"}},"properties":{"v":{"$ref":"#/$defs/P"}}}`,
+		`{"type":"object","$defs":{"Size":{"anyOf":[{"enum":["1024x1024","auto"]},{"pattern":"^[1-9][0-9]*x[1-9][0-9]*$"}]}},"properties":{"size":{"$ref":"#/$defs/Size"}}}`,
+	}
+	levels := []ValidateLevel{ValidateLevelLite, ValidateLevelStrict, ValidateLevelUltra, ValidateLevelDefault}
+	for _, schemaStr := range schemas {
+		for _, level := range levels {
+			schema, err := ParseSchema(schemaStr)
+			require.NoError(t, err)
+			require.NoError(t, schema.Validate(WithValidateLevel(level)),
+				"schema %s should pass at level %s", schemaStr, level)
+		}
+	}
+}
+
+// The shape seen in production: type sits beside anyOf and the branches carry
+// none. Lite and strict accept it as written; Canonical pushes the parent type
+// into each branch.
+func TestValidateParentTypeBesideTypelessAnyOfBranches(t *testing.T) {
+	schemaStr := `{"type":"object","properties":{"size":{"type":"string","description":"d","anyOf":[{"enum":["1024x1024","auto"]},{"pattern":"^[1-9][0-9]*x[1-9][0-9]*$"}]}}}`
+	for _, level := range []ValidateLevel{ValidateLevelLite, ValidateLevelStrict} {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		require.NoError(t, schema.Validate(WithValidateLevel(level)), "should pass at level %s", level)
+	}
+
+	schema, err := ParseSchema(schemaStr)
+	require.NoError(t, err)
+	canonical, warnErr := schema.Canonical()
+	require.NoError(t, warnErr)
+	require.JSONEq(t,
+		`{"type":"object","properties":{"size":{"description":"d","anyOf":[{"type":"string","enum":["1024x1024","auto"]},{"type":"string","pattern":"^[1-9][0-9]*x[1-9][0-9]*$"}]}}}`,
+		canonical)
+}
+
+func TestValidateEnumStringLengthWithoutType(t *testing.T) {
+	schemaStr := `{"type":"object","properties":{"v":{"enum":["aaaaaaaaaa","bbbbbbbbbb","cccccccccc"]}}}`
+	levels := []ValidateLevel{ValidateLevelLite, ValidateLevelStrict, ValidateLevelUltra, ValidateLevelDefault}
+	for _, level := range levels {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		err = schema.Validate(
+			WithValidateLevel(level),
+			WithMaxEnumStringCheckThreshold(2),
+			WithMaxEnumStringLength(20),
+		)
+		require.Error(t, err, "over-length enum without type should still fail at level %s", level)
+		require.Contains(t, err.Error(), "exceeds maximum limit")
+	}
+}
+
+// A typeless node with object or array keywords is walked like its typed
+// counterpart: required properties and a positive minItems are followed into
+// their subschemas, so only a real cycle is rejected.
+func TestRefTerminationTypelessContainers(t *testing.T) {
+	terminating := []string{
+		`{"type":"object","$defs":{"N":{"properties":{"a":{"type":"string"}},"required":["a"]}},"properties":{"n":{"$ref":"#/$defs/N"}},"required":["n"]}`,
+		`{"type":"object","$defs":{"N":{"properties":{"next":{"$ref":"#/$defs/N"}}}},"properties":{"n":{"$ref":"#/$defs/N"}},"required":["n"]}`,
+		`{"type":"object","$defs":{"L":{"items":{"$ref":"#/$defs/L"}}},"properties":{"l":{"$ref":"#/$defs/L"}},"required":["l"]}`,
+		`{"type":"object","$defs":{"L":{"items":{"enum":["a"]},"minItems":1}},"properties":{"l":{"$ref":"#/$defs/L"}},"required":["l"]}`,
+	}
+	for _, schemaStr := range terminating {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		require.NoError(t, schema.Validate(WithValidateLevel(ValidateLevelLite)), "schema %s should terminate", schemaStr)
+	}
+
+	cycles := []string{
+		`{"type":"object","$defs":{"N":{"properties":{"next":{"$ref":"#/$defs/N"}},"required":["next"]}},"properties":{"n":{"$ref":"#/$defs/N"}},"required":["n"]}`,
+		`{"type":"object","$defs":{"L":{"items":{"$ref":"#/$defs/L"},"minItems":1}},"properties":{"l":{"$ref":"#/$defs/L"}},"required":["l"]}`,
+	}
+	for _, schemaStr := range cycles {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		err = schema.Validate(WithValidateLevel(ValidateLevelLite))
+		require.Error(t, err, "schema %s should be rejected", schemaStr)
+		require.Contains(t, err.Error(), "infinite recursion")
+	}
+}
+
+// The structure, anyOf and $ref of one node constrain the same instance, so a
+// node whose structure terminates still fails when its anyOf or $ref cannot.
+func TestRefTerminationCombinesStructureAnyOfAndRef(t *testing.T) {
+	loop := `"Loop":{"type":"object","properties":{"next":{"$ref":"#/$defs/Loop"}},"required":["next"]}`
+	wrap := func(def string) string {
+		return `{"type":"object","$defs":{` + loop + `,"N":` + def + `},"properties":{"n":{"$ref":"#/$defs/N"}},"required":["n"]}`
+	}
+	cycles := []string{
+		wrap(`{"type":"object","properties":{"x":{"type":"string"}},"anyOf":[{"$ref":"#/$defs/Loop"}]}`),
+		wrap(`{"properties":{"x":{"type":"string"}},"anyOf":[{"$ref":"#/$defs/Loop"}]}`),
+		wrap(`{"type":"array","items":{"$ref":"#/$defs/Loop"},"minItems":1,"anyOf":[{"type":"array"}]}`),
+	}
+	for _, schemaStr := range cycles {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		err = schema.Validate(WithValidateLevel(ValidateLevelLite))
+		require.Error(t, err, "schema %s should be rejected", schemaStr)
+		require.Contains(t, err.Error(), "infinite recursion")
+	}
+
+	terminating := []string{
+		wrap(`{"type":"object","properties":{"x":{"type":"string"}},"anyOf":[{"$ref":"#/$defs/Loop"},{"required":["x"]}]}`),
+		`{"type":"object","$defs":{"A":{"type":"string"},"N":{"anyOf":[{"$ref":"#/$defs/A"}],"$ref":"#/$defs/A"}},"properties":{"n":{"$ref":"#/$defs/N"}},"required":["n"]}`,
+	}
+	for _, schemaStr := range terminating {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		require.NoError(t, schema.Validate(WithValidateLevel(ValidateLevelLite)), "schema %s should terminate", schemaStr)
+	}
+}
+
+// Whether a subtree is checked for termination is decided per key. A sibling
+// additionalProperties must not switch the check off for properties, whatever
+// order the keys are visited in.
+func TestRefTerminationIndependentOfKeyOrder(t *testing.T) {
+	schemaStr := `{"type":"object","$defs":{"Loop":{"type":"object","properties":{"next":{"$ref":"#/$defs/Loop"}},"required":["next"]}},"additionalProperties":{"type":"string"},"properties":{"n":{"$ref":"#/$defs/Loop"}},"required":["n"]}`
+	for i := 0; i < 50; i++ {
+		schema, err := ParseSchema(schemaStr)
+		require.NoError(t, err)
+		err = schema.Validate(WithValidateLevel(ValidateLevelStrict))
+		require.Error(t, err, "run %d accepted a non-terminating required property", i)
+		require.Contains(t, err.Error(), "infinite recursion")
+	}
+}

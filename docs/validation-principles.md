@@ -195,6 +195,8 @@ Contradictions count when a branch uses `$ref` too: a parent `"type":"string"` o
 | Negative bound value | `{"type":"string","minLength":-1}` | `{"type":"string","minLength":0}` |
 | `enum` holds values the `type` rules out | `{"type":"string","enum":["a",1,"b"]}` | `{"type":"string","enum":["a","b"]}` — only the ill-typed values go |
 | Every `enum` value is ruled out by `type` | `{"type":["null"],"enum":[false]}` | `{"type":["null"]}` — the whole `enum` disappears |
+| `enum` without `type` | `{"enum":["a","b"]}` | `{"type":"string","enum":["a","b"]}` — the type is inferred when all values share one scalar type; mixed or non-scalar values empty the field instead |
+| `pattern` without `type` | `{"pattern":"^a+$"}` | `{"type":"string","pattern":"^a+$"}` — a pattern only constrains strings, so filling in the type changes nothing |
 | Lower bound above upper bound | `{"type":"string","minLength":10,"maxLength":2}` | `{}` — the field loses all constraints |
 | Multiple `type`s plus other structural keywords | `{"type":["string","integer"],"minLength":1}` | `{}` — the field loses all constraints |
 | `enum` has no overlap with the definition's `enum` | `{"type":"string","enum":["x"],"$ref":"#/$defs/S"}`<br>`S = {"type":"string","enum":["y"],"minLength":9}` | `{"type":"string","minLength":9}` — only the `enum` is dropped |
@@ -228,6 +230,9 @@ Self-reference itself is supported. The criterion is **whether a finite JSON doc
 | `{"properties":{"children":{"type":"array","items":{"$ref":"#"}}},"required":["children"]}` | Passes | `{"children":[]}` satisfies it; an empty array asks nothing of `items` |
 | `{"properties":{"next":{"$ref":"#"}},"required":["next"]}` | Rejected | Every level demands a next one |
 | The array version of the previous row, plus `"minItems":1` | Rejected | The array cannot be empty, so the recursion cannot bottom out |
+| A definition without `type` that carries only `enum` / `pattern`, e.g. `"$defs":{"E":{"enum":["a","b"]}}` | Passes | `"a"` is a finite instance; nothing in it can recurse |
+| A definition without `type` that carries `properties` / `required` or `items` / `minItems` | Same as the typed version | It is checked as an object or an array respectively, so a required cycle is still rejected |
+| An object whose own required properties terminate, but whose `anyOf` (or `$ref`) can only reach a required cycle | Rejected | `anyOf` / `$ref` apply together with the node's own structure, so every one of them has to terminate |
 
 ## 7. Unsupported keywords
 
@@ -247,6 +252,10 @@ Self-reference itself is supported. The criterion is **whether a finite JSON doc
 | Empty-string property name | The property was deleted on rewrite | Kept as written; listing it in `required` works as usual |
 | Required properties forming a reference cycle | Accepted, but no valid output could be generated | Rejected |
 | Required array self-reference without `minItems` | Rejected (a misjudgement) | Accepted |
+| `enum` without `type` (including inside an `anyOf` branch whose parent declares `type`) | Rejected (`type is not defined`) | Accepted; the `type` is inferred from the values on rewrite |
+| A `$defs` definition without `type` carrying only `enum` / `pattern`, referenced through `$ref` | Rejected | Accepted |
+| An object whose structure terminates but whose `anyOf` / `$ref` sibling can only reach a required cycle | Accepted | Rejected |
+| A required cycle next to a sibling `additionalProperties` | Accepted or rejected depending on key order (random) | Always rejected |
 | Lower bound above upper bound | Accepted; both bounds were deleted on rewrite | `lite` accepts but degrades the field to `{}`; `strict` and above reject |
 
 There is one more pervasive change in rewrite results: previously, a single spot needing a rewrite could make `Canonical` return an empty `{}` and lose the whole set of constraints; now only the field at fault degrades, and everything else is preserved intact.
