@@ -639,8 +639,11 @@ func (v *schemaValidator) CanonicalWithMaxAttempts(schema Schema, maxAttempts in
 	// which silently loosens the schema whenever the sibling was the stricter of
 	// the two. anyOf is distributed first because doing so can leave a constraint
 	// beside a branch's $ref, which is what the inlining pass then folds in.
+	// Missing types are inferred before anything else: validation accepts their
+	// absence, and an inferred type then travels with the siblings distributed
+	// and inlined below.
 	inlined, droppedSiblings := inlineConflictingRefSiblings(
-		distributeAnyOfParentKeywords(hoistLocalRefs(schema)),
+		distributeAnyOfParentKeywords(inferMissingTypes(hoistLocalRefs(schema))),
 		v.config.MaxSchemaSize,
 	)
 	currentSchema := Schema(inlined)
@@ -804,17 +807,20 @@ func (v *schemaValidator) TraverseAndCheckRefs(schema SchemaDict, needCheckTermi
 
 		switch schemaValue := value.(type) {
 		case SchemaDict:
-			// skip some conditions that do not need to check termination
+			// Skip some conditions that do not need to check termination. The
+			// decision is made per key: keys are visited in map order, so carrying
+			// it over to the next key would make the verdict depend on that order.
+			childNeedsCheck := needCheckTermination
 			if key == Properties {
 				if required, ok := schema[Required]; ok {
 					if requiredList, ok := required.(SchemaList); ok {
 						if len(requiredList) == 0 {
-							needCheckTermination = false
+							childNeedsCheck = false
 						}
 					}
 				}
 			} else if key == AdditionalProperties {
-				needCheckTermination = false
+				childNeedsCheck = false
 			} else if len(requiredList) > 0 {
 				findRequired := false
 				for _, req := range requiredList {
@@ -824,11 +830,11 @@ func (v *schemaValidator) TraverseAndCheckRefs(schema SchemaDict, needCheckTermi
 					}
 				}
 				if !findRequired {
-					needCheckTermination = false
+					childNeedsCheck = false
 				}
 			}
 
-			if err := v.TraverseAndCheckRefs(schemaValue, needCheckTermination, requiredList, newPath); err != nil {
+			if err := v.TraverseAndCheckRefs(schemaValue, childNeedsCheck, requiredList, newPath); err != nil {
 				return err
 			}
 		case SchemaList:
@@ -1042,154 +1048,63 @@ func (v *schemaValidator) checkRefTermination(schema SchemaDict, visitedRefs map
 				checkType = typ.(string)
 			}
 		}
+	} else {
+		// Without a type the structure keywords tell which recursive checks apply,
+		// so a typeless object or array is walked the same as a typed one.
+		checkType = containerTypeFromKeywords(schema)
 	}
 
-	cut := false
-
-	// Array items if empty can terminate
-	if checkType == Array {
-		// Without a positive minItems the empty array is a valid instance, so the
-		// array terminates no matter what items demands. Only a non-empty lower
-		// bound forces us to prove that items itself can terminate.
-		if minItems, ok := schema[MinItems].(float64); !ok || minItems <= 0 {
-			return true, false, nil
-		}
-
-		items, exists := schema[Items]
-		if !exists || items == nil {
-			return true, false, nil
-		}
-
-		if itemsDict, ok := items.(SchemaDict); ok && len(itemsDict) == 0 {
-			return true, false, nil
-		}
-
-		// check array items whether it can terminate
-		if itemsDict, ok := items.(SchemaDict); ok {
-			terminates, itemsCut, err := v.checkRefTermination(itemsDict, visitedRefs, memo, path.Append(Items))
-			if err != nil {
-				return false, false, err
-			}
-			if terminates {
-				return true, itemsCut, nil
-			}
-			cut = cut || itemsCut
-		}
+	// The structure, anyOf and $ref of one node all apply to the same instance,
+	// so the node terminates only when each of them does.
+	var structureTerminates, cut bool
+	var err error
+	switch checkType {
+	case Array:
+		structureTerminates, cut, err = v.arrayTerminates(schema, visitedRefs, memo, path)
+	case Object:
+		structureTerminates, cut, err = v.objectTerminates(schema, visitedRefs, memo, path)
+	default:
+		structureTerminates = true
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if !structureTerminates {
+		return false, cut, nil
 	}
 
-	// Object required
-	if checkType == Object {
-		required, exists := schema[Required]
-		// required if empty can terminate
-		if !exists || required == nil {
-			return true, false, nil
-		}
-
-		if requiredList, ok := required.(SchemaList); ok && len(requiredList) == 0 {
-			return true, false, nil
-		}
-
-		// if properties is empty, it can terminate
-		props, hasProps := schema[Properties].(SchemaDict)
-		if !hasProps || len(props) == 0 {
-			return true, false, nil
-		}
-
-		// iterate properties
-		requiredSet := make(map[string]struct{})
-		for _, req := range required.(SchemaList) {
-			if reqStr, ok := req.(string); ok {
-				requiredSet[reqStr] = struct{}{}
-			}
-		}
-
-		// Every required property has to be present in a valid instance, so the
-		// object only terminates when all of them do. A single non-terminating
-		// required property makes the object unsatisfiable by any finite document.
-		for propName, propSchema := range props {
-			propSchemaObj, ok := propSchema.(SchemaDict)
-			if !ok {
-				return false, false, v.context.RaiseErrorWithSimplify("property schema must be an object", path.Append(propName), SimplifyRemoveProperties)
-			}
-
-			// only check required properties
-			if _, exists := requiredSet[propName]; !exists {
-				continue
-			}
-
-			// Each property walks its own visited set; two sibling properties
-			// pointing at the same $ref is not a cycle.
-			propRefs := make(map[string]struct{})
-			for k := range visitedRefs {
-				propRefs[k] = struct{}{}
-			}
-
-			terminates, propCut, err := v.checkRefTermination(propSchemaObj, propRefs, memo, path.Append(Properties, propName))
-			if err != nil {
-				return false, false, err
-			}
-			if !terminates {
-				return false, propCut, nil
-			}
-			cut = cut || propCut
-		}
-
-		return true, cut, nil
-	}
-
-	// Check anyOf branches
-	if anyOf, ok := schema[AnyOf].(SchemaList); ok {
-		// if anyOf is empty, it can terminate
-		if len(anyOf) == 0 {
-			return true, false, nil
-		}
-
-		allRefs := make(map[string]struct{})
+	// At least one anyOf branch has to terminate. Each branch walks its own copy
+	// of the visited set: a branch is an alternative, not a step down the path.
+	if anyOf, ok := schema[AnyOf].(SchemaList); ok && len(anyOf) > 0 {
+		branchTerminates := false
 		for i, item := range anyOf {
 			itemSchema, ok := item.(SchemaDict)
 			if !ok {
 				return false, false, v.context.RaiseErrorWithSimplify("schema in anyOf must be an object", path.Append(AnyOf), SimplifyRemoveAnyOf)
 			}
 
-			// Create a new copy of visited refs for each branch
-			branchRefs := make(map[string]struct{})
-			for k := range visitedRefs {
-				branchRefs[k] = struct{}{}
-			}
-
-			terminates, branchCut, err := v.checkRefTermination(itemSchema, branchRefs, memo, path.Append(AnyOf, strconv.Itoa(i)))
+			terminates, branchCut, err := v.checkRefTermination(itemSchema, copyRefSet(visitedRefs), memo, path.Append(AnyOf, strconv.Itoa(i)))
 			if err != nil {
 				return false, false, err
 			}
-			if terminates {
-				// Update visited refs with branch refs
-				for k := range branchRefs {
-					visitedRefs[k] = struct{}{}
-				}
-				return true, branchCut, nil
-			}
 			cut = cut || branchCut
-
-			// Collect all refs from this branch
-			for k := range branchRefs {
-				allRefs[k] = struct{}{}
+			if terminates {
+				branchTerminates = true
+				break
 			}
 		}
-
-		// Update visited refs with all collected refs
-		for k := range allRefs {
-			visitedRefs[k] = struct{}{}
+		if !branchTerminates {
+			return false, cut, nil
 		}
 	}
 
-	// Check ref
 	if ref, ok := schema[Ref].(string); ok {
 		if _, exists := visitedRefs[ref]; exists {
 			return false, true, nil
 		}
 
 		if result, done := memo[ref]; done {
-			return result, false, nil
+			return result, cut, nil
 		}
 
 		visitedRefs[ref] = struct{}{}
@@ -1205,14 +1120,104 @@ func (v *schemaValidator) checkRefTermination(schema SchemaDict, visitedRefs map
 		if !targetCut {
 			memo[ref] = result
 		}
-		return result, targetCut, nil
+		return result, cut || targetCut, nil
 	}
 
-	if len(schema) == 0 {
+	// Nothing left can recurse. This covers a node without type and without
+	// object or array structure as well: an enum value, or any string for a bare
+	// pattern, is a finite instance.
+	return true, cut, nil
+}
+
+// arrayTerminates reports whether an array node admits a finite instance.
+// Without a positive minItems the empty array is a valid instance, so the array
+// terminates no matter what items demands. Only a non-empty lower bound forces
+// us to prove that items itself can terminate.
+func (v *schemaValidator) arrayTerminates(schema SchemaDict, visitedRefs map[string]struct{}, memo map[string]bool, path schemaPath) (bool, bool, error) {
+	if minItems, ok := schema[MinItems].(float64); !ok || minItems <= 0 {
 		return true, false, nil
 	}
 
-	return false, cut, nil
+	itemsDict, ok := schema[Items].(SchemaDict)
+	if !ok || len(itemsDict) == 0 {
+		return true, false, nil
+	}
+
+	return v.checkRefTermination(itemsDict, copyRefSet(visitedRefs), memo, path.Append(Items))
+}
+
+// objectTerminates reports whether an object node admits a finite instance.
+// Every required property has to be present in a valid instance, so the object
+// only terminates when all of them do. A single non-terminating required
+// property makes the object unsatisfiable by any finite document.
+func (v *schemaValidator) objectTerminates(schema SchemaDict, visitedRefs map[string]struct{}, memo map[string]bool, path schemaPath) (bool, bool, error) {
+	required, ok := schema[Required].(SchemaList)
+	if !ok || len(required) == 0 {
+		return true, false, nil
+	}
+
+	props, hasProps := schema[Properties].(SchemaDict)
+	if !hasProps || len(props) == 0 {
+		return true, false, nil
+	}
+
+	requiredSet := make(map[string]struct{})
+	for _, req := range required {
+		if reqStr, ok := req.(string); ok {
+			requiredSet[reqStr] = struct{}{}
+		}
+	}
+
+	cut := false
+	for propName, propSchema := range props {
+		propSchemaObj, ok := propSchema.(SchemaDict)
+		if !ok {
+			return false, false, v.context.RaiseErrorWithSimplify("property schema must be an object", path.Append(propName), SimplifyRemoveProperties)
+		}
+
+		if _, exists := requiredSet[propName]; !exists {
+			continue
+		}
+
+		// Each property walks its own visited set; two sibling properties
+		// pointing at the same $ref is not a cycle.
+		terminates, propCut, err := v.checkRefTermination(propSchemaObj, copyRefSet(visitedRefs), memo, path.Append(Properties, propName))
+		if err != nil {
+			return false, false, err
+		}
+		cut = cut || propCut
+		if !terminates {
+			return false, cut, nil
+		}
+	}
+
+	return true, cut, nil
+}
+
+func copyRefSet(refs map[string]struct{}) map[string]struct{} {
+	copied := make(map[string]struct{}, len(refs))
+	for k := range refs {
+		copied[k] = struct{}{}
+	}
+	return copied
+}
+
+// containerTypeFromKeywords names the container type a typeless node describes
+// through its keywords, or "" when it carries no object or array structure.
+// Object keywords win when both kinds appear, since only required can force a
+// cycle through an object.
+func containerTypeFromKeywords(schema SchemaDict) string {
+	for _, keyword := range []string{Properties, Required, AdditionalProperties} {
+		if _, ok := schema[keyword]; ok {
+			return Object
+		}
+	}
+	for _, keyword := range []string{Items, MinItems, MaxItems} {
+		if _, ok := schema[keyword]; ok {
+			return Array
+		}
+	}
+	return ""
 }
 
 // ExpandRef expands a reference

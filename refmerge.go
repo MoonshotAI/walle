@@ -151,6 +151,131 @@ func mergeableSiblings(node SchemaDict, root SchemaDict, ref string) (SchemaDict
 	return siblings, true
 }
 
+// Inferring a missing type from the keywords present.
+
+// inferMissingTypes fills in the type of nodes where it follows unambiguously
+// from the node's own keywords, before Canonical validation. Validation accepts
+// such nodes as written; this pass exists so the canonical form still carries
+// the explicit type the enforcer expects. An enum whose values share one scalar
+// type determines that type; a pattern can only constrain strings. An enum with
+// mixed or non-scalar values has no MFJS type to infer, so the node is emptied
+// instead of being left without a type. The input is not modified.
+func inferMissingTypes(root SchemaDict) SchemaDict {
+	if len(root) == 0 || !hasInferrableMissingType(root) {
+		return root
+	}
+
+	copied, ok := deepCopyValue(root).(SchemaDict)
+	if !ok {
+		return root
+	}
+
+	inferTypesInTree(copied)
+	return copied
+}
+
+// hasInferrableMissingType reports whether the subtree holds a node worth
+// rewriting, so the common case costs a single read-only walk.
+func hasInferrableMissingType(node SchemaDict) bool {
+	if _, hasType := node[Type]; !hasType {
+		if _, hasEnum := node[Enum]; hasEnum {
+			return true
+		}
+		if _, hasPattern := node[Pattern]; hasPattern {
+			return true
+		}
+	}
+	for _, child := range childSchemas(node) {
+		if hasInferrableMissingType(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func inferTypesInTree(node SchemaDict) {
+	if _, hasType := node[Type]; !hasType {
+		if enumValue, hasEnum := node[Enum]; hasEnum {
+			if enum, ok := enumValue.(SchemaList); ok && len(enum) > 0 {
+				inferred, ok := inferTypeFromEnumValues(enum)
+				if !ok {
+					for key := range node {
+						delete(node, key)
+					}
+					return
+				}
+				node[Type] = inferred
+			}
+		} else if _, ok := node[Pattern].(string); ok {
+			node[Type] = String
+		}
+	}
+	for _, child := range childSchemas(node) {
+		inferTypesInTree(child)
+	}
+}
+
+// childSchemas returns the subschemas directly below a node, following only
+// schema positions: properties and $defs entries, items, additionalProperties,
+// and anyOf branches. Keyword values that hold instances rather than schemas,
+// such as default and enum entries, are deliberately not descended into, and
+// the properties table itself is not a schema either.
+func childSchemas(node SchemaDict) []SchemaDict {
+	var children []SchemaDict
+	for _, keyword := range []string{Properties, Defs} {
+		table, ok := node[keyword].(SchemaDict)
+		if !ok {
+			continue
+		}
+		for _, child := range table {
+			if childDict, ok := child.(SchemaDict); ok {
+				children = append(children, childDict)
+			}
+		}
+	}
+	for _, keyword := range []string{Items, AdditionalProperties} {
+		if child, ok := node[keyword].(SchemaDict); ok {
+			children = append(children, child)
+		}
+	}
+	if anyOf, ok := node[AnyOf].(SchemaList); ok {
+		for _, branch := range anyOf {
+			if branchDict, ok := branch.(SchemaDict); ok {
+				children = append(children, branchDict)
+			}
+		}
+	}
+	return children
+}
+
+// inferTypeFromEnumValues returns the single scalar type shared by every enum
+// value. Numbers all map to number, which admits integers too, so the inferred
+// type never rules out a value the enum lists.
+func inferTypeFromEnumValues(enum SchemaList) (string, bool) {
+	inferred := ""
+	for _, val := range enum {
+		var valueType string
+		switch val.(type) {
+		case string:
+			valueType = String
+		case bool:
+			valueType = Boolean
+		case float64:
+			valueType = Number
+		case nil:
+			valueType = Null
+		default:
+			return "", false
+		}
+		if inferred == "" {
+			inferred = valueType
+		} else if inferred != valueType {
+			return "", false
+		}
+	}
+	return inferred, inferred != ""
+}
+
 // distributeAnyOfParentKeywords rewrites every node that constrains an instance
 // both directly and through anyOf. The two apply together, but the enforcer's
 // anyOf is a plain union with no room for a conjunct beside it, so the parent

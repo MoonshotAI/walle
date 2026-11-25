@@ -186,7 +186,11 @@ func (v *keywordValidators) ValidateEnum(value any, context *validationContext, 
 
 	currentType, hasType := parentSchema[Type]
 	if !hasType {
-		return context.RaiseErrorWithSimplify("type is not defined", path.Parent(), SimplifyRemoveParentSchema)
+		// An enum without type is legal under 2020-12: the values alone already
+		// constrain the instance, so the missing type itself is not an error.
+		// Canonical infers the type in inferMissingTypes before validating. The
+		// string-length budget still applies, driven by the values themselves.
+		return v.validateEnumStringLength(enum, nil, context, path)
 	}
 
 	// Convert type to list for consistent handling
@@ -263,40 +267,43 @@ func (v *keywordValidators) ValidateEnum(value any, context *validationContext, 
 	}
 
 	// Check string length constraint for string enums
-	limitLengthTypes := []string{String, Number, Integer}
-	hasLimitType := false
+	return v.validateEnumStringLength(enum, typeList, context, path)
+}
+
+// validateEnumStringLength enforces the combined string-length budget for large
+// enums. An empty typeList means the node declares no type; the values can still
+// carry strings and numbers, so the budget applies just the same.
+func (v *keywordValidators) validateEnumStringLength(enum SchemaList, typeList []string, context *validationContext, path schemaPath) error {
+	hasLimitType := len(typeList) == 0
 	for _, t := range typeList {
-		for _, lt := range limitLengthTypes {
-			if t == lt {
-				hasLimitType = true
-				break
-			}
-		}
-		if hasLimitType {
+		if t == String || t == Number || t == Integer {
+			hasLimitType = true
 			break
 		}
 	}
 
-	if hasLimitType && len(enum) > v.config.MaxEnumStringCheckThreshold {
-		totalLength := 0
-		for _, val := range enum {
-			switch v := val.(type) {
-			case string:
-				totalLength += len(v)
-			case float64:
-				// Convert numbers to string and count their length
-				totalLength += len(fmt.Sprintf("%v", v))
-			}
-		}
+	if !hasLimitType || len(enum) <= v.config.MaxEnumStringCheckThreshold {
+		return nil
+	}
 
-		if totalLength > v.config.MaxEnumStringLength {
-			return context.RaiseErrorWithSimplify(
-				fmt.Sprintf("total string length of enum values (%d) exceeds maximum limit of %d "+
-					"characters when enum has more than %d values",
-					totalLength, v.config.MaxEnumStringLength, v.config.MaxEnumStringCheckThreshold),
-				path, SimplifyRemoveEnum,
-			)
+	totalLength := 0
+	for _, val := range enum {
+		switch v := val.(type) {
+		case string:
+			totalLength += len(v)
+		case float64:
+			// Convert numbers to string and count their length
+			totalLength += len(fmt.Sprintf("%v", v))
 		}
+	}
+
+	if totalLength > v.config.MaxEnumStringLength {
+		return context.RaiseErrorWithSimplify(
+			fmt.Sprintf("total string length of enum values (%d) exceeds maximum limit of %d "+
+				"characters when enum has more than %d values",
+				totalLength, v.config.MaxEnumStringLength, v.config.MaxEnumStringCheckThreshold),
+			path, SimplifyRemoveEnum,
+		)
 	}
 
 	return nil

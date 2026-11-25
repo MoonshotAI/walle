@@ -195,6 +195,8 @@
 | 边界值为负 | `{"type":"string","minLength":-1}` | `{"type":"string","minLength":0}` |
 | `enum` 里有 `type` 不允许的值 | `{"type":"string","enum":["a",1,"b"]}` | `{"type":"string","enum":["a","b"]}`，只去掉不合类型的值 |
 | `enum` 里全部值都不合 `type` | `{"type":["null"],"enum":[false]}` | `{"type":["null"]}`，`enum` 整个消失 |
+| `enum` 没有 `type` | `{"enum":["a","b"]}` | `{"type":"string","enum":["a","b"]}`，值同属一种标量类型时推断补全 `type`；类型混杂或含非标量值时该字段退化为 `{}` |
+| `pattern` 没有 `type` | `{"pattern":"^a+$"}` | `{"type":"string","pattern":"^a+$"}`，pattern 只约束字符串，补全类型不改变接受集合 |
 | 下界大于上界 | `{"type":"string","minLength":10,"maxLength":2}` | `{}`，该字段失去全部约束 |
 | 多个 `type` 且带其他结构关键字 | `{"type":["string","integer"],"minLength":1}` | `{}`，该字段失去全部约束 |
 | `enum` 与定义的 `enum` 无交集 | `{"type":"string","enum":["x"],"$ref":"#/$defs/S"}`<br>`S = {"type":"string","enum":["y"],"minLength":9}` | `{"type":"string","minLength":9}`，只丢掉 `enum` |
@@ -228,6 +230,9 @@
 | `{"properties":{"children":{"type":"array","items":{"$ref":"#"}}},"required":["children"]}` | 通过 | `{"children":[]}` 满足，空数组对 `items` 无要求 |
 | `{"properties":{"next":{"$ref":"#"}},"required":["next"]}` | 拒绝 | 每一层都还需要下一层 |
 | 上一行的数组版本再加 `"minItems":1` | 拒绝 | 数组不能为空，递归无法收尾 |
+| 无 `type`、只带 `enum` / `pattern` 的定义，如 `"$defs":{"E":{"enum":["a","b"]}}` | 通过 | `"a"` 就是有限实例，里面没有能递归的结构 |
+| 无 `type`、带 `properties` / `required` 或 `items` / `minItems` 的定义 | 与写了 type 的版本相同 | 分别按 object / array 检查，必填属性成环仍然拒绝 |
+| 对象自身的必填属性能收尾，但同级 `anyOf`（或 `$ref`）只能走到必填属性成环 | 拒绝 | `anyOf` / `$ref` 与节点自身结构同时生效，每一项都要能收尾 |
 
 ## 七、不支持的关键字
 
@@ -247,6 +252,10 @@
 | 属性名是空字符串 | 改写时删掉该属性 | 原样保留，`required` 里列它也照常生效 |
 | 必填属性构成引用环 | 放行，但无法生成有效结果 | 拒绝 |
 | 必填数组自引用、未写 `minItems` | 拒绝（误判） | 放行 |
+| `enum` 没有 `type`（含 `anyOf` 分支里、外层写了 `type` 的情况） | 拒绝（`type is not defined`） | 放行，改写时按取值推断 `type` |
+| `$defs` 里无 `type`、只带 `enum` / `pattern` 的定义被 `$ref` 引用 | 拒绝 | 放行 |
+| 对象结构能收尾，但同级 `anyOf` / `$ref` 只能走到必填属性成环 | 放行 | 拒绝 |
+| 必填属性成环，且同级有 `additionalProperties` | 取决于关键字遍历顺序，随机放行或拒绝 | 始终拒绝 |
 | 下界大于上界 | 放行，改写时删掉两个边界 | `lite` 放行但该字段退化为 `{}`，`strict` 及以上拒绝 |
 
 改写结果还有一处普遍变化：过去只要 schema 里有一处需要改写，`Canonical` 就可能返回空的 `{}`、丢掉整份约束；现在只有出问题的那个字段会退化，其余部分完整保留。
